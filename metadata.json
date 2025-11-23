@@ -1,0 +1,8 @@
+{
+  "name": "Needo",
+  "description": "A platform connecting users for services with AI-assisted task creation and secure escrow payments.",
+  "requestFramePermissions": [
+    "microphone",
+    "geolocation"
+  ]
+}
