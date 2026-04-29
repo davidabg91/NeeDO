@@ -1,7 +1,7 @@
 
 import React, { useState, useEffect, useRef } from 'react';
 import { X, Send, Bot, Sparkles, Mic, MicOff, ArrowRight, Check, Camera, Loader2, Edit2, MapPin, Navigation, Search, User, Plus, Trash2, TrendingDown, Info, Image as ImageIcon, Users, Clock, CalendarClock, Zap, Calendar, ListFilter, Target, ShieldCheck, Stars } from 'lucide-react';
-import { Chat } from '@google/genai';
+import { ChatSession } from '@google/generative-ai';
 import { createTaskChatSession, sendMessageToGemini, estimateTaskPrice } from '../services/geminiService';
 import { AIAnalysisResult } from '../types';
 import { useLanguage } from '../contexts/LanguageContext';
@@ -62,7 +62,7 @@ export const AIChatCreation: React.FC<AIChatCreationProps> = ({ isOpen, onClose,
   const [isLocationPickerOpen, setIsLocationPickerOpen] = useState(false);
   const [timingType, setTimingType] = useState<'ASAP' | 'SPECIFIC' | 'FLEXIBLE'>('ASAP');
   const [specificDate, setSpecificDate] = useState('');
-  const [chatSession, setChatSession] = useState<Chat | null>(null);
+  const [chatSession, setChatSession] = useState<ChatSession | null>(null);
   const [isLoading, setIsLoading] = useState(false);
   const [isListening, setIsListening] = useState(false);
   const [aiResult, setAiResult] = useState<AIAnalysisResult | null>(null);
