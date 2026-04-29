@@ -5,7 +5,7 @@ import { X, Lock, ShieldCheck, Loader2 } from 'lucide-react';
 
 // Initialize Stripe outside of component to avoid recreating the object
 // In a real app, use an environment variable for the publishable key
-const stripePromise = loadStripe(process.env.VITE_STRIPE_PUBLISHABLE_KEY || 'pk_test_PLACEHOLDER');
+const stripePromise = loadStripe(import.meta.env.VITE_STRIPE_PUBLISHABLE_KEY || 'pk_test_51TRYJlBKl53MyTasCEsS42ZPcstD6F5aEPhXdiNuxvKsoZ9yBnnsfgKzuDRt4RAEVnPv8ZBPLJFdB2BRzeEj2RzO00y7OAEPFQ');
 
 interface CheckoutFormProps {
   amountEuro: number;
