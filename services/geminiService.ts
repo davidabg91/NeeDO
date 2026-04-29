@@ -54,12 +54,12 @@ export const sendMessageToGemini = async (
   if (!ai) return { text: "", error: "AI услугата не е инициализирана." };
   
   try {
-    const systemPrompt = `
-        ТИ СИ ЕКСПЕРТЕН АСИСТЕНТ (NEEDO AI). ТВОЯТА ЦЕЛ Е ДА СЪЗДАДЕШ ОБЯВА В ТОЧНО 2 СТЪПКИ.
+    const systemInstruction = `
+        ТИ СИ ЕКСПЕРТЕН АСИСТЕНТ (NEEDO AI). ТВОЯТА ЦЕЛ Е ДА СЪЗДАДЕШ ПЕРФЕКТНАТА ОБЯВА В 2 СТЪПКИ.
         
         >>> ПРАВИЛО НА ДВЕТЕ СТЪПКИ <<<
-        1. ПЪРВО СЪОБЩЕНИЕ: Задай САМО ЕДИН технически въпрос (кг, модел, детайл). ЗАБРАНЕНО е да даваш JSON сега.
-        2. ВТОРО СЪОБЩЕНИЕ (след отговор): СЪБЕРИ ВСИЧКО И ДАЙ JSON. ЗАБРАНЕНО е да питаш повече.
+        1. СТЪПКА 1 (Първо съобщение): Задай САМО ЕДИН технически въпрос. БЕЗ JSON.
+        2. СТЪПКА 2 (След отговор): СЪБЕРИ ЦЯЛАТА ИНФОРМАЦИЯ (от началото на чата) и създай JSON. 
         
         >>> СТИЛ И ПЕРСПЕКТИВА <<<
         - Пиши винаги от 1-во лице ("Търся...", "Кучето ми е...", "Дисплеят ми е...").
@@ -67,32 +67,30 @@ export const sendMessageToGemini = async (
         - БЕЗ ЛЮБЕЗНОСТИ. БЕЗ СЪВЕТИ.
         
         >>> ФОРМАТ JSON <<<
-        {"title": "...", "description": "...", "category": "..."}
+        Връщай JSON обект: {"title": "...", "description": "...", "category": "..."}
     `;
 
+    // Map history to Gemini format
     const contents: any[] = history.map(h => ({
       role: h.role === 'ai' ? 'model' : 'user',
       parts: [{ text: h.text }]
     }));
 
-    const currentMessageParts: any[] = [];
-    if (contents.length === 0) {
-      currentMessageParts.push({ text: systemPrompt + "\n\nПОТРЕБИТЕЛСКО ОПИСАНИЕ: " + message });
-    } else {
-      currentMessageParts.push({ text: message });
-    }
-
+    // Add current message
+    const currentParts: any[] = [{ text: message }];
     if (imageBase64) {
-      currentMessageParts.push({ inlineData: { mimeType: "image/jpeg", data: imageBase64.split(',')[1] } });
+      currentParts.push({ inlineData: { mimeType: "image/jpeg", data: imageBase64.split(',')[1] } });
     }
 
     contents.push({
       role: 'user',
-      parts: currentMessageParts
+      parts: currentParts
     });
 
+    // In 2026 SDK, we use systemInstruction parameter for persistent memory
     const response = await ai.models.generateContent({
       model: 'gemini-2.5-flash',
+      systemInstruction: systemInstruction,
       contents: contents,
     });
 
@@ -101,7 +99,7 @@ export const sendMessageToGemini = async (
     let analysis: AIAnalysisResult | undefined;
     const jsonMatch = text.match(/\{[\s\S]*\}/);
     
-    // Force JSON if we have history (meaning we already asked a question)
+    // We expect JSON if we have history
     if (jsonMatch && contents.length > 1) {
       try {
         analysis = JSON.parse(jsonMatch[0]);
@@ -110,13 +108,15 @@ export const sendMessageToGemini = async (
 
     let cleanText = text.replace(/```json[\s\S]*?```/g, "").replace(/\{[\s\S]*\}/g, "").trim();
     
-    // If we have history but AI failed to provide JSON, force create one
+    // Fallback logic if AI is lost but we have history
     if (contents.length > 1 && !analysis) {
+      // Find the first user message which contains the task
+      const firstTask = history.find(h => h.role === 'user')?.text || message;
        return { 
          text: "", 
          analysis: { 
-           title: message.substring(0, 50), 
-           description: history.map(h => h.text).join("\n") + "\n" + message, 
+           title: firstTask.substring(0, 50), 
+           description: `Търся услуга за: ${firstTask}\nДетайли: ${message}`, 
            category: "Други" 
          } 
        };
@@ -124,7 +124,7 @@ export const sendMessageToGemini = async (
 
     if (analysis) return { text: "", analysis };
 
-    return { text: cleanText || "Моля, отговорете, за да завършим обявата.", analysis };
+    return { text: cleanText || "Моля, дайте детайли за задачата.", analysis };
   } catch (error: any) {
     console.error("Gemini Error:", error?.message || String(error));
     return { text: "", error: `Грешка от Google: ${error?.message || "Неуспешен анализ"}` };
