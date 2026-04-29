@@ -4,11 +4,11 @@ export const stripeService = {
   /**
    * Calls the backend to create a Stripe Express account and returns the onboarding URL.
    */
-  async createConnectAccount(userId: string): Promise<string> {
+  async createStripeAccount(userId: string, accountType: 'individual' | 'company' = 'individual'): Promise<string> {
     const res = await fetch(`${CLOUD_FUNCTIONS_BASE_URL}/createStripeAccount`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ userId }),
+      body: JSON.stringify({ userId, accountType }),
     });
 
     if (!res.ok) {

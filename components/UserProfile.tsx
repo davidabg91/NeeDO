@@ -173,19 +173,15 @@ export const UserProfile: React.FC<UserProfileProps> = ({
 
   // REAL STRIPE CONNECT
   const handleConnectStripe = async () => {
-      setIsConnectingStripe(true);
+      setIsStripeLoading(true);
       try {
-          // Call the backend function to create an account and get the onboarding URL
-          const url = await stripeService.createConnectAccount(user.id);
-          
-          // Redirect the user to Stripe's hosted onboarding flow
+          const url = await stripeService.createStripeAccount(user.id, stripeBusinessType);
           window.location.href = url;
-          
-      } catch (e) {
-          console.error("Stripe connect failed", e instanceof Error ? e.message : String(e));
-          alert("Възникна грешка при свързването със Stripe: " + (e instanceof Error ? e.message : ""));
+      } catch (error) {
+          console.error("Stripe Connection Error:", error);
+          alert("Грешка при свързване със Stripe. Моля опитайте пак.");
       } finally {
-          setIsConnectingStripe(false);
+          setIsStripeLoading(false);
       }
   };
 
@@ -588,12 +584,29 @@ export const UserProfile: React.FC<UserProfileProps> = ({
                                             Използваме <span className="font-bold text-[#635BFF]">Stripe Connect</span> за сигурни и директни преводи към вашата банка. Регистрацията отнема 2 минути.
                                         </p>
 
+                                        <div className="grid grid-cols-2 gap-3 mb-6">
+                                            <button 
+                                                onClick={() => setStripeBusinessType('individual')}
+                                                className={`flex flex-col items-center gap-2 p-4 rounded-2xl border-2 transition-all ${stripeBusinessType === 'individual' ? 'border-[#635BFF] bg-indigo-50 text-[#635BFF]' : 'border-slate-100 text-slate-500 hover:border-slate-200'}`}
+                                            >
+                                                <User size={24} />
+                                                <span className="text-[10px] font-black uppercase tracking-wider">Физическо лице</span>
+                                            </button>
+                                            <button 
+                                                onClick={() => setStripeBusinessType('company')}
+                                                className={`flex flex-col items-center gap-2 p-4 rounded-2xl border-2 transition-all ${stripeBusinessType === 'company' ? 'border-[#635BFF] bg-indigo-50 text-[#635BFF]' : 'border-slate-100 text-slate-500 hover:border-slate-200'}`}
+                                            >
+                                                <Building2 size={24} />
+                                                <span className="text-[10px] font-black uppercase tracking-wider">Фирма</span>
+                                            </button>
+                                        </div>
+
                                         <button 
                                             onClick={handleConnectStripe}
-                                            disabled={isConnectingStripe}
+                                            disabled={isStripeLoading}
                                             className="w-full py-4 bg-[#635BFF] hover:bg-[#5851E3] text-white rounded-xl font-bold text-sm shadow-lg shadow-indigo-500/30 active:scale-[0.98] transition-all flex items-center justify-center gap-2"
                                         >
-                                            {isConnectingStripe ? <Loader2 size={18} className="animate-spin" /> : (
+                                            {isStripeLoading ? <Loader2 size={18} className="animate-spin" /> : (
                                                 <>Свържи се със Stripe <ArrowRight size={18} /></>
                                             )}
                                         </button>

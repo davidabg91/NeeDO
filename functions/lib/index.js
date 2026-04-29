@@ -37,10 +37,10 @@ exports.createStripeAccount = functions.region('europe-west1').https.onRequest((
                     type: "express",
                     country: "BG",
                     email: (userData === null || userData === void 0 ? void 0 : userData.email) || undefined,
+                    business_type: "individual",
                     capabilities: {
                         transfers: { requested: true },
                     },
-                    business_type: (userData === null || userData === void 0 ? void 0 : userData.isCompany) ? "company" : "individual",
                 });
                 accountId = account.id;
                 // Save account ID to Firestore

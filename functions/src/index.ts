@@ -24,7 +24,7 @@ export const createStripeAccount = functions.region('europe-west1').https.onRequ
     }
 
     try {
-      const { userId } = req.body;
+      const { userId, accountType = "individual" } = req.body;
       if (!userId) {
         res.status(400).send({ error: "Missing userId" });
         return;
@@ -41,10 +41,10 @@ export const createStripeAccount = functions.region('europe-west1').https.onRequ
           type: "express",
           country: "BG",
           email: userData?.email || undefined,
+          business_type: accountType === "company" ? "company" : "individual",
           capabilities: {
             transfers: { requested: true },
           },
-          business_type: userData?.isCompany ? "company" : "individual",
         });
         accountId = account.id;
 
