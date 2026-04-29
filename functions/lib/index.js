@@ -15,7 +15,7 @@ const stripe = new stripe_1.default(stripeSecret, {
 });
 const cors = corsLib({ origin: true });
 // 1. Create a Stripe Connect Express Account
-exports.createStripeAccount = functions.https.onRequest((req, res) => {
+exports.createStripeAccount = functions.region('europe-west1').https.onRequest((req, res) => {
     cors(req, res, async () => {
         if (req.method !== "POST") {
             res.status(405).send("Method Not Allowed");
@@ -64,7 +64,7 @@ exports.createStripeAccount = functions.https.onRequest((req, res) => {
     });
 });
 // 2. Create Payment Intent (Escrow)
-exports.createPaymentIntent = functions.https.onRequest((req, res) => {
+exports.createPaymentIntent = functions.region('europe-west1').https.onRequest((req, res) => {
     cors(req, res, async () => {
         if (req.method !== "POST") {
             res.status(405).send("Method Not Allowed");
@@ -97,14 +97,14 @@ exports.createPaymentIntent = functions.https.onRequest((req, res) => {
     });
 });
 // 3. Release Escrow (Capture Payment Intent and Transfer to Provider)
-exports.releaseEscrow = functions.https.onRequest((req, res) => {
+exports.releaseEscrow = functions.region('europe-west1').https.onRequest((req, res) => {
     cors(req, res, async () => {
         if (req.method !== "POST") {
             res.status(405).send("Method Not Allowed");
             return;
         }
         try {
-            const { paymentIntentId, providerAccountId, amount, platformFeePercent = 10 } = req.body;
+            const { paymentIntentId, providerAccountId, amount, platformFeePercent = 3 } = req.body;
             if (!paymentIntentId || !providerAccountId || !amount) {
                 res.status(400).send({ error: "Missing required parameters" });
                 return;

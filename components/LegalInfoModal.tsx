@@ -136,31 +136,30 @@ export const LegalInfoModal: React.FC<LegalInfoModalProps> = ({ isOpen, onClose,
                             <div className="grid grid-cols-1 md:grid-cols-2 gap-y-4 gap-x-8 text-sm text-slate-700">
                                 <div>
                                     <span className="block text-[10px] font-bold text-slate-400 uppercase">Доставчик на услугата</span>
-                                    <strong className="block text-slate-900">"НИДО ТЕХНОЛОДЖИС" ЕООД</strong>
-                                    <span className="text-xs text-slate-500">(Примерна фирма)</span>
+                                    <strong className="block text-slate-900">"ДАВИДА БГ" ЕООД</strong>
                                 </div>
 
                                 <div>
                                     <span className="block text-[10px] font-bold text-slate-400 uppercase">ЕИК / БУЛСТАТ</span>
-                                    <span className="font-mono bg-slate-200 px-1 rounded text-xs">207XXXXXX</span>
+                                    <span className="font-mono bg-slate-200 px-1 rounded text-xs">204356138</span>
                                 </div>
 
                                 <div>
                                     <span className="block text-[10px] font-bold text-slate-400 uppercase">Седалище и адрес на управление</span>
                                     <div className="flex items-start gap-1.5 mt-0.5">
                                         <MapPin size={14} className="shrink-0 mt-0.5 text-slate-400" />
-                                        <span>гр. София 1000, р-н Средец, бул. "Витоша" №10, ет. 3</span>
+                                        <span>гр. Плевен 5802, жк. Сторгозия, ул. Цар Самуил, паркинг бл. 34А</span>
                                     </div>
                                 </div>
 
                                 <div>
                                     <span className="block text-[10px] font-bold text-slate-400 uppercase">Данъчна регистрация (ДДС)</span>
-                                    <span className="font-mono">BG207XXXXXX</span>
+                                    <span className="font-mono text-slate-600 text-xs">Нерегистрирана по ЗДДС</span>
                                 </div>
 
                                 <div>
                                     <span className="block text-[10px] font-bold text-slate-400 uppercase">МОЛ (Управител)</span>
-                                    <span>Иван Иванов</span>
+                                    <span>Дейвид Василев Димитров</span>
                                 </div>
 
                                 <div>
@@ -238,7 +237,7 @@ export const LegalInfoModal: React.FC<LegalInfoModalProps> = ({ isOpen, onClose,
                         <div className="bg-slate-100 border-l-4 border-slate-900 p-4 rounded-r-xl">
                             <h4 className="font-bold text-slate-900 text-sm mb-2">I. Статус на посредник (Venue)</h4>
                             <p className="text-xs text-slate-600 leading-relaxed">
-                                "НИДО ТЕХНОЛОДЖИС" ЕООД предоставя платформа за свързване на потребители. Ние действаме единствено като доставчик на услуга на информационното общество по смисъла на Закона за електронната търговия.
+                                "ДАВИДА БГ" ЕООД предоставя платформа за свързване на потребители. Ние действаме единствено като доставчик на услуга на информационното общество по смисъла на Закона за електронната търговия.
                                 <br /><br />
                                 Needo <strong>не е страна по договорите за услуги</strong>, сключвани между потребителите. Ние не наемаме изпълнителите и не носим отговорност за техните действия или бездействия.
                             </p>
@@ -431,8 +430,8 @@ export const LegalInfoModal: React.FC<LegalInfoModalProps> = ({ isOpen, onClose,
                         <div className="bg-slate-50 p-4 rounded-xl border border-slate-200">
                             <h4 className="font-bold text-slate-800 text-xs uppercase mb-1">Администратор на лични данни</h4>
                             <p className="text-xs text-slate-600">
-                                "НИДО ТЕХНОЛОДЖИС" ЕООД, ЕИК 207XXXXXX<br />
-                                Адрес: гр. София, бул. Витоша 10
+                                "ДАВИДА БГ" ЕООД, ЕИК 204356138<br />
+                                Адрес: гр. Плевен 5802, жк. Сторгозия, ул. Цар Самуил, паркинг бл. 34А
                             </p>
                         </div>
 
@@ -503,7 +502,7 @@ export const LegalInfoModal: React.FC<LegalInfoModalProps> = ({ isOpen, onClose,
                 </nav>
 
                 <div className="relative z-10 pt-6 border-t border-slate-800 text-[10px] text-slate-500 text-center">
-                    &copy; 2024 Needo Technologies EOOD.
+                    &copy; {new Date().getFullYear()} DAVIDA BG LTD EOOD.
                 </div>
             </div>
 

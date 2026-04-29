@@ -1,4 +1,4 @@
-const CLOUD_FUNCTIONS_BASE_URL = "https://us-central1-needo-3cfbd.cloudfunctions.net";
+const CLOUD_FUNCTIONS_BASE_URL = "https://europe-west1-needo-3cfbd.cloudfunctions.net";
 
 export const stripeService = {
   /**
@@ -49,8 +49,8 @@ export const stripeService = {
       body: JSON.stringify({
         paymentIntentId,
         providerAccountId,
-        amount: amountEuro,
-        platformFeePercent: 10 // 10% platform fee
+        amount: amountEuro, // This is the base Agreed Price
+        platformFeePercent: 3 // Provider pays 3% of base price (Client already paid extra 3%)
       }),
     });
 

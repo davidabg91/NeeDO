@@ -545,12 +545,13 @@ const AppContent: React.FC = () => {
         if (!offer) return;
 
         setPendingPaymentTaskId(taskId);
-        setPaymentAmount(offer.price);
+        const totalToPay = offer.price * 1.03; // Agreed price + 3% client fee
+        setPaymentAmount(totalToPay);
         setIsPaymentModalOpen(true);
         setStripeClientSecret(null);
 
         try {
-            const { clientSecret, paymentIntentId } = await stripeService.createPaymentIntent(taskId, offer.price);
+            const { clientSecret, paymentIntentId } = await stripeService.createPaymentIntent(taskId, totalToPay);
             setStripeClientSecret(clientSecret);
             setPaymentIntentId(paymentIntentId);
         } catch (error) {
@@ -643,6 +644,10 @@ const AppContent: React.FC = () => {
                 const providerUser = await getUserById(offer.providerId);
                 const providerAccountId = providerUser?.stripeAccountId;
                 if (providerAccountId) {
+                    // Total Paid was 103% of price. 
+                    // Platform Fee is 6% of base price.
+                    // Provider gets 97% of base price.
+                    // We tell the service to release the escrow based on the base offer price.
                     await stripeService.releaseEscrow(task.paymentIntentId, providerAccountId, offer.price);
                 } else {
                     console.error("Provider has no Stripe account linked to receive funds.");
