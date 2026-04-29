@@ -590,7 +590,7 @@ export const UserProfile: React.FC<UserProfileProps> = ({
                                                 onClick={() => setStripeBusinessType('individual')}
                                                 className={`flex flex-col items-center gap-2 p-4 rounded-2xl border-2 transition-all ${stripeBusinessType === 'individual' ? 'border-[#635BFF] bg-indigo-50 text-[#635BFF]' : 'border-slate-100 text-slate-500 hover:border-slate-200'}`}
                                             >
-                                                <User size={24} />
+                                                <UserIcon size={24} />
                                                 <span className="text-[10px] font-black uppercase tracking-wider">Физическо лице</span>
                                             </button>
                                             <button 
