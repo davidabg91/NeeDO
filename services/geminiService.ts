@@ -36,10 +36,7 @@ export const estimateTaskPrice = async (title: string, description: string): Pro
   try {
     const response = await ai.models.generateContent({
       model: 'gemini-2.5-flash',
-      contents: `Ти си експерт оценител на услуги в България. 
-      Задача: "${title}". 
-      Описание: "${description}". 
-      Дай само реалистичен ценови диапазон в Български лева (BGN). Формат: "XX - YY лв.". Без друг текст!`,
+      contents: `Ти си експерт оценител на услуги в Европа. Задача: "${title}". Описание: "${description}". Дай ми само реалистичен ценови диапазон в ЕВРО (EUR). Формат: "XX - YY €". Ако не е възможно - "По договаряне".`,
     });
     return response.text.trim();
   } catch (error) {
@@ -58,28 +55,26 @@ export const sendMessageToGemini = async (
   
   try {
     const systemInstruction = `
-        ТИ СИ ЕКСПЕРТЕН АСИСТЕНТ НА NeeDO. 
-        
-        ПРАВИЛА ЗА "АГРЕСИВНА ДЕДУКЦИЯ":
-        Когато анализираш снимка, ти трябва да ПОЗНАЕШ техническите детайли, вместо да питаш за тях.
-        1. ЗА ЖИВОТНИ: Виждаш породата? -> Автоматично определи теглото (напр. Лабрадор ~30кг). Не питай!
-        2. ЗА ТЕХНИКА/КОЛИ: Определи марка и модел визуално.
-        3. ЗА РЕМОНТИ: Оцени квадратурата или сложността визуално.
-        
-        ПРАВИЛА ЗА ПОВЕДЕНИЕ:
-        - ЕДИН ПО ЕДИН: Задавай само по ЕДИН въпрос в съобщение.
-        - БЕЗ ЛЮБЕЗНОСТИ: Бъди кратък, точен и директен.
-        - ПЕРСПЕКТИВА: Пиши обявата от 1-во лице ("Търся...", "Трябва ми...").
-        - КАТЕГОРИИ: Използвай само от този списък: [Домашен майстор, ВиК Услуги, Електро услуги, Строителство, Почистване, Монтаж на мебели, Боядисване, Ключарски услуги, Транспорт, Пътна помощ, Авто услуги, Автомивка, Ремонт на техника, IT Услуги, Дизайн, Уроци, Преводи, Красота, Спорт, Гледане на деца, Домашни любимци, Градинарство, Събития, Фотография, Счетоводство, Други]
+        ТИ СИ ЕКСПЕРТЕН АСИСТЕНТ (NEEDO AI). ТВОЯТА ЦЕЛ Е ДА СЪЗДАДЕШ ПЕРФЕКТНАТА ОБЯВА ЗА УСЛУГА.
 
-        ФИНАЛИЗИРАНЕ:
-        Когато си готов, върни JSON: {"title": "...", "description": "...", "category": "..."}
-        В описанието ВКЛЮЧИ ВСИЧКИ СВОИ ДЕДУКЦИИ (кг, марки, размери).
+        >>> 1. АНАЛИЗ НА СНИМКАТА (ПРИОРИТЕТ) <<<
+        Ако потребителят е качил снимка, ТЯ Е ТВОЯТ ГЛАВЕН ИЗТОЧНИК!
+        Преди да питаш, АНАЛИЗИРАЙ СНИМКАТА ЗА ТЕХНИЧЕСКИ ДЕТАЙЛИ.
+
+        >>> 2. ПРАВИЛА <<<
+        - НИКОГА НЕ ПИТАЙ ЗА ЛОКАЦИЯ ИЛИ ВРЕМЕ.
+        - Задавай само по 1 кратък въпрос наведнъж.
+        - МАКСИМУМ 3 ВЪПРОСА общо.
+        - СТИЛ: Професионален, директен, на български език.
+        
+        >>> 3. КРАЕН РЕЗУЛТАТ (JSON) <<<
+        Когато си готов, върни JSON обект. Описанието (description) трябва да е в 1-во лице ("Търся...", "Трябва ми...").
+        JSON: {"title": "...", "description": "...", "category": "..."}
     `;
 
-    const contents: any[] = history.map((h, i) => ({
+    const contents: any[] = history.map(h => ({
       role: h.role === 'ai' ? 'model' : 'user',
-      parts: [{ text: (i === 0 ? "СИСТЕМНИ ПРАВИЛА: " + systemInstruction + "\n\n" : "") + h.text }]
+      parts: [{ text: h.text }]
     }));
 
     const currentParts: any[] = [{ text: message }];
@@ -104,18 +99,19 @@ export const sendMessageToGemini = async (
     let analysis: AIAnalysisResult | undefined;
     const jsonMatch = text.match(/\{[\s\S]*\}/);
     
-    if (jsonMatch && contents.length > 1) {
+    if (jsonMatch) {
       try {
         analysis = JSON.parse(jsonMatch[0]);
       } catch (e) {}
     }
 
     let cleanText = text.replace(/```json[\s\S]*?```/g, "").replace(/\{[\s\S]*\}/g, "").trim();
+
     if (analysis) return { text: "", analysis };
-    return { text: cleanText || "Какви са детайлите?", analysis };
+    return { text: cleanText || "Моля, дайте повече детайли.", analysis };
   } catch (error: any) {
     console.error("Gemini Error:", error?.message || String(error));
-    return { text: "", error: "Техническа грешка." };
+    return { text: "", error: "Възникна грешка при анализа. Опитайте отново." };
   }
 };
 
@@ -125,24 +121,24 @@ export const getOfferHelpQuestion = async (taskTitle: string, taskDesc: string):
   try {
     const response = await ai.models.generateContent({
       model: 'gemini-2.5-flash',
-      contents: `Въпрос за: "${taskTitle}".`,
+      contents: `Задай кратък въпрос за задача: "${taskTitle}".`,
     });
     return response.text.trim();
   } catch (error) {
-    return "Имате ли опит?";
+    return "Имате ли професионален опит?";
   }
 };
 
 export const generateOfferPitch = async (taskTitle: string, providerAnswer: string): Promise<string> => {
-  const ai = aiInstance;
-  if (!ai) return `Имам опит: ${providerAnswer}.`;
+  const ai = getAI();
+  if (!ai) return `Разполагам с опит: ${providerAnswer}.`;
   try {
     const response = await ai.models.generateContent({
       model: 'gemini-2.5-flash',
-      contents: `Оферта за: "${taskTitle}". Отговор: "${providerAnswer}".`,
+      contents: `Оферта за: "${taskTitle}". Отговор на майстора: "${providerAnswer}".`,
     });
     return response.text.trim();
   } catch (error) {
-    return `Имам опит: ${providerAnswer}.`;
+    return `Разполагам с опит: ${providerAnswer}.`;
   }
 };
