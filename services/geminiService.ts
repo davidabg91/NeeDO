@@ -2,17 +2,38 @@
 import { GoogleGenAI, Chat, GenerateContentResponse, Part } from "@google/genai";
 import { AIAnalysisResult } from "../types";
 
-// Initialize Gemini with the API key from environment variables
-const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
+let aiInstance: GoogleGenAI | null = null;
 
-export const createTaskChatSession = (): Chat => {
+const getAI = (): GoogleGenAI | null => {
+  if (aiInstance) return aiInstance;
+  
+  // Vite replaces these at build time. We check for common "missing" values.
+  const apiKey = process.env.API_KEY || "";
+  
+  if (!apiKey || apiKey === "undefined" || apiKey === "null" || apiKey.length < 5) {
+    return null;
+  }
+  
+  try {
+    aiInstance = new GoogleGenAI({ apiKey });
+    return aiInstance;
+  } catch (e) {
+    console.error("Failed to initialize Gemini SDK:", e);
+    return null;
+  }
+};
+
+export const createTaskChatSession = (): Chat | null => {
+  const ai = getAI();
+  if (!ai) return null;
+  
   return ai.chats.create({
     model: 'gemini-3-flash-preview',
     config: {
       temperature: 0.2, 
       systemInstruction: `
         ТИ СИ ЕКСПЕРТЕН АСИСТЕНТ (NEEDO AI). ТВОЯТА ЦЕЛ Е ДА СЪЗДАДЕШ ПЕРФЕКТНАТА ОБЯВА ЗА УСЛУГА.
-
+        
         >>> 1. АНАЛИЗ НА СНИМКАТА (СУПЕР ПРИОРИТЕТ) <<<
         Ако потребителят е качил снимка, ТЯ Е ТВОЯТ ГЛАВЕН ИЗТОЧНИК!
         Преди да питаш каквото и да е, АНАЛИЗИРАЙ СНИМКАТА ЗА ТЕХНИЧЕСКИ ДЕТАЙЛИ.
@@ -30,19 +51,21 @@ export const createTaskChatSession = (): Chat => {
         >>> 4. КРАЕН РЕЗУЛТАТ (JSON) <<<
         Когато си готов, върни JSON обект. Описанието (description) трябва да е в 1-во лице.
 
-        \`\`\`json
+        ```json
         {
           "title": "Заглавие",
           "description": "Описание",
           "category": "Категория"
         }
-        \`\`\`
+        ```
       `,
     },
   });
 };
 
 export const estimateTaskPrice = async (title: string, description: string): Promise<string> => {
+  const ai = getAI();
+  if (!ai) return "По договаряне";
   try {
     const response = await ai.models.generateContent({
       model: 'gemini-3-flash-preview',
@@ -55,10 +78,13 @@ export const estimateTaskPrice = async (title: string, description: string): Pro
 };
 
 export const sendMessageToGemini = async (
-  chat: Chat, 
+  chat: Chat | null, 
   message: string, 
   imageBase64?: string | null
 ): Promise<{ text: string; analysis?: AIAnalysisResult }> => {
+  const ai = getAI();
+  if (!chat || !ai) return { text: "AI услугата не е конфигурирана в момента. Моля, добавете описание ръчно." };
+  
   try {
     const parts: Part[] = [];
     
@@ -72,15 +98,12 @@ export const sendMessageToGemini = async (
       parts.push({ text: message });
     }
 
-    // FIX: Correct usage of chat.sendMessage according to guidelines
-    // Passing the array of parts directly as the 'message' parameter
     const result: GenerateContentResponse = await chat.sendMessage({ 
       message: parts.length > 1 ? parts : (parts[0]?.text || message)
     });
     
     const text = result.text || "";
 
-    // Safer parsing to avoid regex backtracking issues
     let analysis: AIAnalysisResult | undefined;
     const jsonStart = text.indexOf('{');
     const jsonEnd = text.lastIndexOf('}');
@@ -94,17 +117,17 @@ export const sendMessageToGemini = async (
       }
     }
 
-    // Clean text for UI
     let cleanText = text.replace(/```json[\s\S]*?```/g, "").replace(/\{[\s\S]*\}/g, "").trim();
-
     return { text: cleanText || (analysis ? "" : text), analysis };
   } catch (error: any) {
     console.error("Gemini Error:", error?.message || String(error));
-    return { text: "Възникна грешка при връзката с AI. Моля опитайте отново." };
+    return { text: "Възникна грешка при връзката с AI." };
   }
 };
 
 export const getOfferHelpQuestion = async (taskTitle: string, taskDesc: string): Promise<string> => {
+  const ai = getAI();
+  if (!ai) return "Имате ли професионален опит с този тип задачи?";
   try {
     const response = await ai.models.generateContent({
       model: 'gemini-3-flash-preview',
@@ -117,6 +140,8 @@ export const getOfferHelpQuestion = async (taskTitle: string, taskDesc: string):
 };
 
 export const generateOfferPitch = async (taskTitle: string, providerAnswer: string): Promise<string> => {
+  const ai = getAI();
+  if (!ai) return `Разполагам с нужния опит: ${providerAnswer}.`;
   try {
     const response = await ai.models.generateContent({
       model: 'gemini-3-flash-preview',
