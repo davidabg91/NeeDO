@@ -36,7 +36,7 @@ export const estimateTaskPrice = async (title: string, description: string): Pro
   try {
     const response = await ai.models.generateContent({
       model: 'gemini-2.5-flash',
-      contents: `Ти си експерт оценител на услуги в Европа. Задача: "${title}". Описание: "${description}". Дай ми само реалистичен ценови диапазон в ЕВРО (EUR). Формат: "XX - YY €". Ако не е възможно - "По договаряне".`,
+      contents: `Ти си експерт оценител на услуги в Европа. Задача: "${title}". Описание: "${description}". На база пазарни цени, дай реалистичен диапазон в ЕВРО (EUR). Формат: "XX - YY €".`,
     });
     return response.text.trim();
   } catch (error) {
@@ -55,31 +55,28 @@ export const sendMessageToGemini = async (
   
   try {
     const systemInstruction = `
-        ТИ СИ ЕКСПЕРТЕН АСИСТЕНТ (NEEDO AI). ТВОЯТА ЦЕЛ Е ДА СЪЗДАДЕШ ПЕРФЕКТНАТА ОБЯВА ЗА УСЛУГА.
+        ТИ СИ ЕКСПЕРТЕН КООРДИНАТОР (NEEDO AI). ТВОЯТА ЦЕЛ Е ДА СЪЗДАДЕШ ТЕХНИЧЕСКО ЗАДАНИЕ ЗА ОБЯВА.
         
-        >>> ТВОЯТА ЗАДАЧА <<<
-        1. АНАЛИЗИРАЙ СНИМКАТА: Тя е твоят основен източник. Виж порода, модел, повреда, размери.
-        2. СЪБЕРИ ИНФО: Ако липсва нещо важно за майстора, ЗАДАЙ ЕДИН КРАТЪК ВЪПРОС.
-        3. ОФОРМИ ОБЯВАТА: Когато си готов, СЪЗДАЙ JSON ОБЕКТ.
+        >>> ТВОЯТА ЛОГИКА <<<
+        1. СВЪРЖИ ТЕКСТА И СНИМКАТА: Ако потребителят каже "смяна на дограма" и качи снимка, ти трябва да видиш прозореца.
+        2. МИСЛИ КАТО ИЗПЪЛНИТЕЛ: Какво ти трябва за цена? (напр. размери, вид материал, брой).
+        3. СТЪПКА 1 (Първо съобщение): Ако липсва важна инфо, задай ЕДИН КРАТЪК И ЯСЕН ВЪПРОС. БЕЗ JSON.
+        4. СТЪПКА 2 (Второ съобщение): Събери всичко и върни JSON. БЕЗ ПОВЕЧЕ ВЪПРОСИ.
         
-        >>> ПРАВИЛА ЗА ОФОРМЯНЕ НА ОБЯВАТА <<<
-        - ПЕРСПЕКТИВА: Пиши от името на КЛИЕНТА (1-во лице). Напр. "Търся...", "Кучето ми е...", "Проблемът е...".
-        - СТИЛ: Професионален, структуриран, с булети. Не преписвай чата, а го преработи в техническо задание.
-        - БЕЗ ФРАЗИ КАТО: "От снимката се вижда", "Потребителят каза". Директно описвай обекта.
+        >>> ПРАВИЛА ЗА ОБЯВАТА <<<
+        - ПЕРСПЕКТИВА: Пиши от името на клиента (1-во лице). Напр. "Търся...", "Трябва ми...".
+        - СТИЛ: Професионален, с ясни параметри и детайли от снимката.
+        - БЕЗ ПРАЗНИ ПРИКАЗКИ: Никакви любезности и обяснения. Само въпрос или JSON.
         
         >>> ФОРМАТ JSON <<<
-        {"title": "Кратко и ясно заглавие", "description": "Подробно и професионално описание", "category": "Категория"}
-        
-        НИКОГА не питай за локация или време.
+        {"title": "Заглавие на задачата", "description": "Професионално описание", "category": "Категория"}
     `;
 
-    // Map history and ensure the first message is prominent
     const contents: any[] = history.map((h, i) => ({
       role: h.role === 'ai' ? 'model' : 'user',
       parts: [{ text: (i === 0 ? "ОСНОВНА ЗАДАЧА: " : "") + h.text }]
     }));
 
-    // Add current message and image
     const currentParts: any[] = [{ text: message }];
     if (imageBase64) {
       currentParts.push({ inlineData: { mimeType: "image/jpeg", data: imageBase64.split(',')[1] } });
@@ -100,6 +97,7 @@ export const sendMessageToGemini = async (
     let analysis: AIAnalysisResult | undefined;
     const jsonMatch = text.match(/\{[\s\S]*\}/);
     
+    // Logic: Force JSON if we have history or if it's the second user interaction
     if (jsonMatch && contents.length > 1) {
       try {
         analysis = JSON.parse(jsonMatch[0]);
@@ -108,21 +106,21 @@ export const sendMessageToGemini = async (
 
     let cleanText = text.replace(/```json[\s\S]*?```/g, "").replace(/\{[\s\S]*\}/g, "").trim();
     
-    // Fallback logic if we are in Step 2 but no JSON
-    if (contents.length > 1 && !analysis) {
-      const mainTask = history[0]?.text || message;
-      return { 
-        text: "", 
-        analysis: { 
-          title: mainTask.substring(0, 50), 
-          description: `Търся услуга за: ${mainTask}\nДетайли: ${message}`, 
-          category: "Други" 
-        } 
-      };
+    // If we have history but no JSON, or if it's taking too long, force finalize
+    if (contents.length > 2 && !analysis) {
+       const mainTask = history[0]?.text || message;
+       return { 
+         text: "", 
+         analysis: { 
+           title: mainTask.substring(0, 50), 
+           description: `Търся услуга за: ${mainTask}\nДетайли: ${message}`, 
+           category: "Други" 
+         } 
+       };
     }
 
     if (analysis) return { text: "", analysis };
-    return { text: cleanText || "Моля, уточнете техническите детайли.", analysis };
+    return { text: cleanText || "Моля, дайте малко повече информация.", analysis };
   } catch (error: any) {
     console.error("Gemini Error:", error?.message || String(error));
     return { text: "", error: `Грешка от Google: ${error?.message || "Неуспешен анализ"}` };
@@ -131,15 +129,15 @@ export const sendMessageToGemini = async (
 
 export const getOfferHelpQuestion = async (taskTitle: string, taskDesc: string): Promise<string> => {
   const ai = getAI();
-  if (!ai) return "Имате ли професионален опит с този тип задачи?";
+  if (!ai) return "Имате ли опит?";
   try {
     const response = await ai.models.generateContent({
       model: 'gemini-2.5-flash',
-      contents: `Ти си клиентът. Задача: "${taskTitle}". Описание: "${taskDesc}". Задай ЕДИН кратък въпрос към майстора за неговия ОПИТ или ИНСТРУМЕНТИ.`,
+      contents: `Задай кратък въпрос към майстора за задача: "${taskTitle}".`,
     });
     return response.text.trim();
   } catch (error) {
-    return "Имате ли професионален опит с този тип задачи?";
+    return "Имате ли професионален опит?";
   }
 };
 
@@ -149,7 +147,7 @@ export const generateOfferPitch = async (taskTitle: string, providerAnswer: stri
   try {
     const response = await ai.models.generateContent({
       model: 'gemini-2.5-flash',
-      contents: `Задача: "${taskTitle}". Майсторът отговори: "${providerAnswer}". Напиши кратко, професионално описание за оферта в 1-во лице. Без поздрави.`,
+      contents: `Напиши кратка оферта от 1-во лице за задача: "${taskTitle}". Отговор на майстора: "${providerAnswer}". Без поздрави.`,
     });
     return response.text.trim();
   } catch (error) {
