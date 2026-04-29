@@ -42,6 +42,8 @@ export const UserProfile: React.FC<UserProfileProps> = ({
 
   // Stripe State
   const [isConnectingStripe, setIsConnectingStripe] = useState(false);
+  const [stripeBusinessType, setStripeBusinessType] = useState<'individual' | 'company'>('individual');
+  const [isStripeLoading, setIsStripeLoading] = useState(false);
   
   // Avatar Upload State
   const fileInputRef = useRef<HTMLInputElement>(null);
