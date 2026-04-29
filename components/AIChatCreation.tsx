@@ -73,6 +73,7 @@ export const AIChatCreation: React.FC<AIChatCreationProps> = ({ isOpen, onClose,
   const [isCalculatingPrice, setIsCalculatingPrice] = useState(false);
   const [estimatedPrice, setEstimatedPrice] = useState<string>('');
   const [isPublishing, setIsPublishing] = useState(false);
+  const [error, setError] = useState('');
 
   const recognitionRef = useRef<any>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
