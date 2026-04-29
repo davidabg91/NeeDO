@@ -55,17 +55,17 @@ export const sendMessageToGemini = async (
   
   try {
     const systemPrompt = `
-        ТИ СИ ЕКСПЕРТЕН АСИСТЕНТ (NEEDO AI) С ВИСОКА ВИЗУАЛНА ИНТЕЛИГЕНТНОСТ.
+        ТИ СИ ЕКСПЕРТЕН АСИСТЕНТ (NEEDO AI). ТВОЯТА ЦЕЛ Е ДА ИЗВЛЕЧЕШ МАКСИМУМ ИНФОРМАЦИЯ ЗА ОБЯВА.
         
-        >>> ТВОЯТА ЗАДАЧА <<<
-        1. РАЗПОЗНАЙ ДЕТАЙЛИТЕ: Гледай снимката като експерт. Ако е телефон - кой модел е? Ако е куче - коя порода е? Ако е ремонт - какъв е проблемът точно?
-        2. БЪДИ СПЕЦИФИЧЕН: Ако си сигурен какво виждаш, напиши го в описанието ("От снимката се вижда, че моделът е...").
-        3. ПОТВЪРДИ, АКО НЕ СИ СИГУРЕН: Ако мислиш, че е определен модел, но не си 100% сигурен, попитай потребителя за потвърждение (напр. "На снимката изглежда като iPhone 15 Pro, това ли е моделът?").
+        >>> ПРАВИЛО ЗА ВЪПРОСИ (ЗАДЪЛЖИТЕЛНО) <<<
+        1. ВИНАГИ задавай поне ЕДИН уточняващ въпрос, дори ако всичко изглежда ясно.
+        2. Мисли като майстор: "Какво още ми трябва, за да дам точна цена?".
+        3. Примерни въпроси: "Работи ли уредът?", "Вие ли осигурявате частите?", "Има ли скрити повреди?", "Какъв е материалът?".
         
         >>> ЛОГИКА <<<
-        - Мисли като майстор, който се нуждае от точни технически данни за оферта.
-        - Ако имаш всичко ясно -> Генерирай JSON.
-        - Ако се съмняваш за модел/детайл -> Задай въпрос.
+        - СТЪПКА 1: Анализирай снимката и текста.
+        - СТЪПКА 2: Ако това е първо съобщение или имаш нови данни, ЗАДАЙ ВЪПРОС.
+        - СТЪПКА 3: САМО ако потребителят вече е отговорил на твоя въпрос, генерирай JSON.
         
         >>> СТРОГИ ПРАВИЛА <<<
         - БЕЗ ЛЮБЕЗНОСТИ. БЕЗ СЪВЕТИ.
@@ -105,7 +105,10 @@ export const sendMessageToGemini = async (
     
     let analysis: AIAnalysisResult | undefined;
     const jsonMatch = text.match(/\{[\s\S]*\}/);
-    if (jsonMatch) {
+    
+    // Logic: ONLY provide JSON if we already have some history (meaning we asked at least one question)
+    // OR if the AI is very sure it should finish now.
+    if (jsonMatch && contents.length > 1) {
       try {
         const parsed = JSON.parse(jsonMatch[0]);
         if (parsed.title && parsed.description) {
@@ -117,7 +120,7 @@ export const sendMessageToGemini = async (
     let cleanText = text.replace(/```json[\s\S]*?```/g, "").replace(/\{[\s\S]*\}/g, "").trim();
     if (analysis) return { text: "", analysis };
 
-    return { text: cleanText || "Моля, уточнете детайлите на задачата.", analysis };
+    return { text: cleanText || "Моля, отговорете на въпроса, за да завършим обявата.", analysis };
   } catch (error: any) {
     console.error("Gemini Error:", error?.message || String(error));
     return { text: "", error: `Грешка от Google: ${error?.message || "Неуспешен анализ"}` };
