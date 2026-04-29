@@ -55,22 +55,16 @@ export const sendMessageToGemini = async (
   
   try {
     const systemPrompt = `
-        ТИ СИ ЕКСПЕРТЕН АСИСТЕНТ (NEEDO AI). ТВОЯТА ЦЕЛ Е ДА ИЗВЛЕЧЕШ МАКСИМУМ ИНФОРМАЦИЯ ЗА ОБЯВА.
+        ТИ СИ ЕКСПЕРТЕН АСИСТЕНТ (NEEDO AI). ТВОЯТА ЦЕЛ Е ДА ИЗВЛЕЧЕШ ДЕТАЙЛИ И ДА СЪЗДАДЕШ ПЕРФЕКТНА ОБЯВА.
         
-        >>> ПРАВИЛО ЗА ВЪПРОСИ (ЗАДЪЛЖИТЕЛНО) <<<
-        1. ВИНАГИ задавай поне ЕДИН уточняващ въпрос, дори ако всичко изглежда ясно.
-        2. Мисли като майстор: "Какво още ми трябва, за да дам точна цена?".
-        3. Примерни въпроси: "Работи ли уредът?", "Вие ли осигурявате частите?", "Има ли скрити повреди?", "Какъв е материалът?".
+        >>> ПРАВИЛА ЗА ПОВЕДЕНИЕ <<<
+        1. ЗАБРАНА ЗА ФИНАЛИЗИРАНЕ: При първото съобщение ТИ Е ЗАБРАНЕНО да връщаш JSON. ТРЯБВА да зададеш поне един уточняващ въпрос за технически детайли (кг, порода, характер, специфики на повредата).
+        2. ЧОВЕШКИ СТИЛ: Пиши обявата така, сякаш ПОТРЕБИТЕЛЯТ я е писал. НИКОГА не използвай фрази като "От снимката се вижда" или "Наблюдава се". Използвай: "Кучето ми е...", "Проблемът е...", "Търся някой за...".
+        3. МАЙСТОРСКИ ПОГЛЕД: Питай за нещата, които вълнуват майстора (тегло, материали, сложност).
         
-        >>> ЛОГИКА <<<
-        - СТЪПКА 1: Анализирай снимката и текста.
-        - СТЪПКА 2: Ако това е първо съобщение или имаш нови данни, ЗАДАЙ ВЪПРОС.
-        - СТЪПКА 3: САМО ако потребителят вече е отговорил на твоя въпрос, генерирай JSON.
-        
-        >>> СТРОГИ ПРАВИЛА <<<
-        - БЕЗ ЛЮБЕЗНОСТИ. БЕЗ СЪВЕТИ.
-        - ПЕРСПЕКТИВА: 1-во лице ("Търся...", "Трябва ми...").
-        - JSON ФОРМАТ: {"title": "...", "description": "...", "category": "..."}
+        >>> ПРОЦЕС <<<
+        - СЪОБЩЕНИЕ 1: Анализирай снимката/текста и ЗАДАЙ ВЪПРОС.
+        - СЪОБЩЕНИЕ 2 (след отговор): Събери всичко и върни JSON: {"title": "...", "description": "...", "category": "..."}.
         
         НИКОГА не питай за локация или време.
     `;
@@ -106,21 +100,17 @@ export const sendMessageToGemini = async (
     let analysis: AIAnalysisResult | undefined;
     const jsonMatch = text.match(/\{[\s\S]*\}/);
     
-    // Logic: ONLY provide JSON if we already have some history (meaning we asked at least one question)
-    // OR if the AI is very sure it should finish now.
+    // STRICT RULE: Only return JSON if it's NOT the first interaction
     if (jsonMatch && contents.length > 1) {
       try {
-        const parsed = JSON.parse(jsonMatch[0]);
-        if (parsed.title && parsed.description) {
-          analysis = parsed;
-        }
+        analysis = JSON.parse(jsonMatch[0]);
       } catch (e) {}
     }
 
     let cleanText = text.replace(/```json[\s\S]*?```/g, "").replace(/\{[\s\S]*\}/g, "").trim();
     if (analysis) return { text: "", analysis };
 
-    return { text: cleanText || "Моля, отговорете на въпроса, за да завършим обявата.", analysis };
+    return { text: cleanText || "Моля, дайте ми малко повече детайли, за да подготвя обявата.", analysis };
   } catch (error: any) {
     console.error("Gemini Error:", error?.message || String(error));
     return { text: "", error: `Грешка от Google: ${error?.message || "Неуспешен анализ"}` };
