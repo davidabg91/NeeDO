@@ -36,7 +36,7 @@ export const estimateTaskPrice = async (title: string, description: string): Pro
   try {
     const response = await ai.models.generateContent({
       model: 'gemini-2.5-flash',
-      contents: `Ти си експерт оценител на услуги в Европа. Задача: "${title}". Описание: "${description}". Дай реалистичен диапазон в ЕВРО (EUR).`,
+      contents: `Оцени задача: "${title}". Само цена в EUR.`,
     });
     return response.text.trim();
   } catch (error) {
@@ -56,29 +56,20 @@ export const sendMessageToGemini = async (
   try {
     const questionCount = Math.floor(history.length / 2);
     
-    const systemInstruction = `
-        ТИ СИ ЕКСПЕРТЕН КООРДИНАТОР (NEEDO AI). ТВОЯТА ЦЕЛ Е ДА СЪБЕРЕШ ИНФО И ДА СЪЗДАДЕШ ОБЯВА.
-        
-        >>> ЖЕЛЕЗНИ ПРАВИЛА <<<
-        1. ЕЗИК: ВИНАГИ ОТГОВАРЯЙ САМО НА БЪЛГАРСКИ ЕЗИК.
-        2. КРАТКОСТ: Задавай САМО ПО ЕДИН кратък въпрос (максимум 10 думи).
-        3. БЕЗ ОПИСАНИЯ: НИКОГА не описвай какво виждаш на снимката. Не размишлявай на глас.
-        4. ЛИМИТ: Имаш право на МАКСИМУМ 3 въпроса. Ти си на въпрос номер ${questionCount + 1}.
-        
-        >>> ПРОЦЕС <<<
-        - Ако имаш инфо или си на 3-ти въпрос -> върни JSON.
-        - Иначе -> задай САМО краткия въпрос на български.
-        
-        >>> ФОРМАТ JSON <<<
-        {"title": "...", "description": "...", "category": "..."}
-    `;
+    // Hardening the prompt by making it extremely direct
+    const promptHeader = `ВИНАГИ ОТГОВАРЯЙ САМО НА БЪЛГАРСКИ. 
+КРАТКОСТ: МАКСИМУМ 10 ДУМИ. 
+БЕЗ ОПИСАНИЯ НА СНИМКАТА.
+АКО СИ НА ВЪПРОС 3 ИЛИ ИМАШ ИНФО -> ВЪРНИ JSON.
+JSON: {"title": "...", "description": "...", "category": "..."}
+ТЕКУЩ ВЪПРОС: ${questionCount + 1}/3.`;
 
     const contents: any[] = history.map((h, i) => ({
       role: h.role === 'ai' ? 'model' : 'user',
-      parts: [{ text: (i === 0 ? "ОСНОВНА ЗАДАЧА: " : "") + h.text }]
+      parts: [{ text: (i === 0 ? promptHeader + "\n" : "") + h.text }]
     }));
 
-    const currentParts: any[] = [{ text: message }];
+    const currentParts: any[] = [{ text: (contents.length === 0 ? promptHeader + "\n" : "") + message }];
     if (imageBase64) {
       currentParts.push({ inlineData: { mimeType: "image/jpeg", data: imageBase64.split(',')[1] } });
     }
@@ -90,7 +81,6 @@ export const sendMessageToGemini = async (
 
     const response = await ai.models.generateContent({
       model: 'gemini-2.5-flash',
-      systemInstruction: systemInstruction,
       contents: contents,
     });
 
@@ -119,7 +109,7 @@ export const sendMessageToGemini = async (
     return { text: cleanText || "Какви са детайлите?", analysis };
   } catch (error: any) {
     console.error("Gemini Error:", error?.message || String(error));
-    return { text: "", error: "Грешка в анализа. Моля, опитайте пак." };
+    return { text: "", error: "Грешка. Моля, опитайте пак." };
   }
 };
 
@@ -129,7 +119,7 @@ export const getOfferHelpQuestion = async (taskTitle: string, taskDesc: string):
   try {
     const response = await ai.models.generateContent({
       model: 'gemini-2.5-flash',
-      contents: `Задай кратък въпрос на български за задача: "${taskTitle}".`,
+      contents: `Кратък въпрос на български за: "${taskTitle}".`,
     });
     return response.text.trim();
   } catch (error) {
@@ -143,7 +133,7 @@ export const generateOfferPitch = async (taskTitle: string, providerAnswer: stri
   try {
     const response = await ai.models.generateContent({
       model: 'gemini-2.5-flash',
-      contents: `Напиши кратка оферта на български за: "${taskTitle}". Отговор: "${providerAnswer}".`,
+      contents: `Оферта на български за: "${taskTitle}". Отговор: "${providerAnswer}".`,
     });
     return response.text.trim();
   } catch (error) {
