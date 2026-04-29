@@ -16,8 +16,11 @@ const getAI = (): GoogleGenAI | null => {
   }
   
   if (!apiKey || apiKey === "undefined" || apiKey === "null" || apiKey.length < 10) {
+    console.warn("Gemini API Key is missing or invalid. Length:", apiKey?.length);
     return null;
   }
+  
+  console.log("Gemini API Key found. Initializing AI...");
   
   try {
     aiInstance = new GoogleGenAI({ apiKey });

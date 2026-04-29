@@ -330,8 +330,14 @@ export const AIChatCreation: React.FC<AIChatCreationProps> = ({ isOpen, onClose,
               </div>
 
               <button onClick={handleStartAnalysis} disabled={photos.length === 0} className="mb-4 w-full py-4 bg-gradient-to-r from-blue-600 to-indigo-600 text-white rounded-[20px] text-sm font-black shadow-xl disabled:opacity-30">
-                <Sparkles size={18} className="inline mr-2" /> {t('ai_btn_analyze')}
+                <Sparkles size={18} className="inline mr-2" /> {chatSession ? t('ai_btn_analyze') : 'ПРОДЪЛЖИ БЕЗ ИИ'}
               </button>
+
+              {!chatSession && (
+                <p className="text-[10px] text-amber-600 font-bold text-center mb-4 bg-amber-50 py-2 rounded-lg border border-amber-100">
+                  ⚠️ ИИ е деактивиран (не е намерен API ключ)
+                </p>
+              )}
 
               {error && (
                 <div className="mb-4 p-3 bg-red-50 border border-red-100 rounded-xl flex gap-3 animate-in fade-in slide-in-from-top-2">
