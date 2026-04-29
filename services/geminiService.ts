@@ -36,7 +36,7 @@ export const estimateTaskPrice = async (title: string, description: string): Pro
   try {
     const response = await ai.models.generateContent({
       model: 'gemini-2.5-flash',
-      contents: `Оцени задача: "${title}". Дай само цена в EUR.`,
+      contents: `Оцени задача: "${title}". Само цена в EUR.`,
     });
     return response.text.trim();
   } catch (error) {
@@ -59,20 +59,19 @@ export const sendMessageToGemini = async (
     const identityInstruction = `
         ТИ СИ ЕКСПЕРТЕН АСИСТЕНТ НА NeeDO. ТВОЯТА МИСИЯ Е ДА СЪЗДАВАШ ПРОФЕСИОНАЛНИ ОБЯВИ.
         
-        >>> ТВОЯТА РОЛЯ <<<
-        - ТИ СИ МОСТЪТ между клиента и майстора.
-        - АНАЛИЗИРАЙ текста и снимката заедно.
-        - МИСЛИ КАТО МАЙСТОР: Питай само за детайлите, които са КРИТИЧНИ за определяне на цена и оферта (размери, материали, специфики).
-        - БЪДИ КРАТЪК: Задавай само по един технически въпрос на български.
+        >>> ВИЗУАЛЕН АНАЛИЗ (ПРИОРИТЕТ №1) <<<
+        - ПЪРВО АНАЛИЗИРАЙ СНИМКАТА. Извлечи от нея модел, цвят, материал, видими повреди и мащаб.
+        - ЗАБРАНЕНО е да питаш за неща, които се виждат на снимката.
+        - Ако на снимката има контакт, не питай "какъв е обекта". Ако е iPhone, не питай "какъв е телефона".
         
-        >>> ТВОЯТА ЦЕЛ <<<
-        - Събери важната информация и я оформи в професионална обява от 1-во лице ("Търся...", "Трябва ми...").
-        - Обявата трябва да информира изпълнителите максимално добре.
+        >>> ТВОЯТА РОЛЯ <<<
+        - Мисли като майстор. Питай само за "скритите" детайли (напр. "имате ли новите части?", "тегло в кг", "специфичен шум/проблем").
+        - Задавай по ЕДИН кратък въпрос на български.
         
         >>> СТРОГИ ПРАВИЛА <<<
-        1. ВИНАГИ ОТГОВАРЯЙ НА БЪЛГАРСКИ.
+        1. ВИНАГИ НА БЪЛГАРСКИ.
         2. МАКСИМУМ 3 ВЪПРОСА. Ти си на въпрос ${questionCount + 1}.
-        3. БЕЗ ОПИСАНИЯ НА СНИМКАТА И БЕЗ ЛЮБЕЗНОСТИ.
+        3. БЕЗ ЛЮБЕЗНОСТИ И БЕЗ ОПИСАНИЯ НА СНИМКАТА.
         4. САМО ВЪПРОС ИЛИ JSON: {"title": "...", "description": "...", "category": "..."}
     `;
 
@@ -82,8 +81,12 @@ export const sendMessageToGemini = async (
     }));
 
     const currentParts: any[] = [{ text: (contents.length === 0 ? identityInstruction + "\n" : "") + message }];
+    
     if (imageBase64) {
-      currentParts.push({ inlineData: { mimeType: "image/jpeg", data: imageBase64.split(',')[1] } });
+      // Improved MIME type detection
+      const mimeType = imageBase64.match(/data:([^;]+);/)?.[1] || "image/jpeg";
+      const base64Data = imageBase64.split(',')[1];
+      currentParts.push({ inlineData: { mimeType, data: base64Data } });
     }
 
     contents.push({
@@ -121,7 +124,7 @@ export const sendMessageToGemini = async (
     return { text: cleanText || "Какви са детайлите?", analysis };
   } catch (error: any) {
     console.error("Gemini Error:", error?.message || String(error));
-    return { text: "", error: "Грешка. Моля, опитайте пак." };
+    return { text: "", error: "Грешка в анализа." };
   }
 };
 
