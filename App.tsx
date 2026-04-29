@@ -209,15 +209,28 @@ const AppContent: React.FC = () => {
 
     useEffect(() => {
         const unsubscribe = onAuthStateChanged(auth, async (firebaseUser) => {
-            if (firebaseUser) {
-                const userData = await syncUserProfile(firebaseUser);
-                setCurrentUser(userData);
-            } else {
+            try {
+                if (firebaseUser) {
+                    const userData = await syncUserProfile(firebaseUser);
+                    setCurrentUser(userData);
+                } else {
+                    setCurrentUser(null);
+                }
+            } catch (e) {
+                console.error("Auth state error:", e);
                 setCurrentUser(null);
+            } finally {
+                setAuthLoading(false);
             }
-            setAuthLoading(false);
         });
-        return () => unsubscribe();
+
+        // Safety timeout to hide splash screen even if Firebase hangs
+        const timeout = setTimeout(() => setAuthLoading(false), 8000);
+
+        return () => {
+            unsubscribe();
+            clearTimeout(timeout);
+        };
     }, []);
 
     useEffect(() => {
