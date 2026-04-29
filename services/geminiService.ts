@@ -90,9 +90,9 @@ export const sendMessageToGemini = async (
   chat: Chat | null, 
   message: string, 
   imageBase64?: string | null
-): Promise<{ text: string; analysis?: AIAnalysisResult }> => {
+): Promise<{ text: string; analysis?: AIAnalysisResult; error?: string }> => {
   const ai = getAI();
-  if (!chat || !ai) return { text: "AI услугата не е конфигурирана в момента. Моля, добавете описание ръчно." };
+  if (!chat || !ai) return { text: "", error: "AI ключът не е конфигуриран или е невалиден." };
   
   try {
     const parts: Part[] = [];
@@ -130,7 +130,11 @@ export const sendMessageToGemini = async (
     return { text: cleanText || (analysis ? "" : text), analysis };
   } catch (error: any) {
     console.error("Gemini Error:", error?.message || String(error));
-    return { text: "Възникна грешка при връзката с AI." };
+    const errorMsg = error?.message || String(error);
+    return { 
+      text: "", 
+      error: `Грешка от Google: ${errorMsg.substring(0, 100)}${errorMsg.length > 100 ? '...' : ''}` 
+    };
   }
 };
 

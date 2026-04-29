@@ -151,8 +151,14 @@ export const AIChatCreation: React.FC<AIChatCreationProps> = ({ isOpen, onClose,
 
     setStep('PROCESSING');
     setIsLoading(true);
+    setError('');
     try {
       const response = await sendMessageToGemini(chatSession, description, photos[0]);
+      if (response.error) {
+        setError(response.error);
+        setIsLoading(false);
+        return;
+      }
       if (response.analysis) { 
         setAiResult(response.analysis); 
         setStep('PREVIEW'); 
@@ -325,6 +331,17 @@ export const AIChatCreation: React.FC<AIChatCreationProps> = ({ isOpen, onClose,
               <button onClick={handleStartAnalysis} disabled={photos.length === 0} className="mb-4 w-full py-4 bg-gradient-to-r from-blue-600 to-indigo-600 text-white rounded-[20px] text-sm font-black shadow-xl disabled:opacity-30">
                 <Sparkles size={18} className="inline mr-2" /> {t('ai_btn_analyze')}
               </button>
+
+              {error && (
+                <div className="mb-4 p-3 bg-red-50 border border-red-100 rounded-xl flex gap-3 animate-in fade-in slide-in-from-top-2">
+                  <div className="w-8 h-8 bg-red-100 rounded-full flex items-center justify-center shrink-0 text-red-600 font-bold">!</div>
+                  <div className="text-[11px] text-red-700 leading-tight">
+                    <p className="font-bold mb-0.5">Грешка при анализа</p>
+                    {error}
+                    <p className="mt-1 opacity-70">Можете да продължите ръчно, като редактирате описанието.</p>
+                  </div>
+                </div>
+              )}
             </div>
           )}
 
