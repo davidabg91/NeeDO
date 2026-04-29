@@ -36,7 +36,7 @@ export const estimateTaskPrice = async (title: string, description: string): Pro
   try {
     const response = await ai.models.generateContent({
       model: 'gemini-2.5-flash',
-      contents: `Ти си оценител. Задача: "${title}". ВЪРНИ САМО ЦЕНОВИ ДИАПАЗОН В EUR. БЕЗ ДРУГ ТЕКСТ. Формат: "XX - YY EUR".`,
+      contents: `Ти си оценител. Задача: "${title}". ВЪРНИ САМО ЦЕНА В EUR. БЕЗ ДРУГ ТЕКСТ.`,
     });
     return response.text.trim();
   } catch (error) {
@@ -57,28 +57,29 @@ export const sendMessageToGemini = async (
     const questionCount = Math.floor(history.length / 2);
     
     const identityInstruction = `
-        ТИ СИ ЕКСПЕРТЕН АСИСТЕНТ НА NeeDO. ТВОЯТА ЦЕЛ Е ДА СЪЗДАДЕШ ОБЯВА.
+        ТИ СИ АСИСТЕНТ ЗА ОБЯВИ В NeeDO. 
         
-        >>> ВАЖНО (ПАМЕТ) <<<
-        - Първото съобщение в историята е ГЛАВНАТА ЗАДАЧА. Никога не я забравяй.
-        - Никога не питай "Какво търсите?", защото вече знаеш от историята.
+        >>> КРИТИЧНО ПРАВИЛО №1 <<<
+        НИКОГА, ПО НИКАКЪВ ПОВОД, НЕ ДАВАЙ СЪВЕТИ ЗА РЕМОНТ, БЕЗОПАСНОСТ ИЛИ СТЪПКИ ЗА РАБОТА.
+        АКО ДАДЕШ СЪВЕТ, ТИ СЕ ПРОВАЛЯШ.
         
-        >>> ПРАВИЛА <<<
-        1. ВИНАГИ НА БЪЛГАРСКИ.
-        2. МАКСИМУМ 3 КРАТКИ ТЕХНИЧЕСКИ ВЪПРОСА.
-        3. СЛЕД ОТГОВОР НА ВЪПРОС -> ВЪРНИ JSON С ОБЯВАТА.
-        4. ПЕРСПЕКТИВА: 1-во лице ("Търся...", "Кучето ми е...").
+        >>> ТВОЯТА ЕДИНСТВЕНА РАБОТА <<<
+        1. Разбери какво търси клиента (от историята и снимката).
+        2. Задай ЕДИН КРАТЪК технически въпрос (макс 10 думи) на БЪЛГАРСКИ.
+        3. Когато си готов, върни JSON с обявата.
         
-        >>> ФОРМАТ JSON <<<
-        {"title": "...", "description": "...", "category": "..."}
+        >>> ОГРАНИЧЕНИЕ <<<
+        Ако не изпращаш JSON, отговорът ти трябва да е САМО ЕДИН ВЪПРОС, под 15 думи.
+        
+        JSON: {"title": "...", "description": "...", "category": "..."}
     `;
 
     const contents: any[] = history.map((h, i) => ({
       role: h.role === 'ai' ? 'model' : 'user',
-      parts: [{ text: (i === 0 ? "ОСНОВНА ЗАДАЧА: " : "") + h.text }]
+      parts: [{ text: (i === 0 ? identityInstruction + "\n" : "") + h.text }]
     }));
 
-    const currentParts: any[] = [{ text: message }];
+    const currentParts: any[] = [{ text: (contents.length === 0 ? identityInstruction + "\n" : "") + message }];
     if (imageBase64) {
       const mimeType = imageBase64.match(/data:([^;]+);/)?.[1] || "image/jpeg";
       const base64Data = imageBase64.split(',')[1];
@@ -110,14 +111,20 @@ export const sendMessageToGemini = async (
        const mainTask = history[0]?.text || message;
        analysis = { 
            title: mainTask.substring(0, 50), 
-           description: `Търся помощ за: ${mainTask}\nДетайли: ${message}`, 
+           description: `Търся услуга за: ${mainTask}\nДетайли: ${message}`, 
            category: "Други" 
        };
     }
 
     let cleanText = text.replace(/```json[\s\S]*?```/g, "").replace(/\{[\s\S]*\}/g, "").trim();
+    
+    // Safety: cut any advice or long text
+    if (cleanText.length > 150 && !analysis) {
+        cleanText = "Моля, дайте само технически детайли за задачата.";
+    }
+
     if (analysis) return { text: "", analysis };
-    return { text: cleanText || "Моля, дайте детайли.", analysis };
+    return { text: cleanText || "Какви са детайлите?", analysis };
   } catch (error: any) {
     console.error("Gemini Error:", error?.message || String(error));
     return { text: "", error: "Грешка в анализа." };
@@ -130,7 +137,7 @@ export const getOfferHelpQuestion = async (taskTitle: string, taskDesc: string):
   try {
     const response = await ai.models.generateContent({
       model: 'gemini-2.5-flash',
-      contents: `Кратък въпрос за: "${taskTitle}".`,
+      contents: `Въпрос за: "${taskTitle}".`,
     });
     return response.text.trim();
   } catch (error) {
@@ -144,7 +151,7 @@ export const generateOfferPitch = async (taskTitle: string, providerAnswer: stri
   try {
     const response = await ai.models.generateContent({
       model: 'gemini-2.5-flash',
-      contents: `Оферта за: "${taskTitle}". Отговор: "${providerAnswer}".`,
+      contents: `Оферта за: "${taskTitle}".`,
     });
     return response.text.trim();
   } catch (error) {
