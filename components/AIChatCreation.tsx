@@ -136,14 +136,41 @@ export const AIChatCreation: React.FC<AIChatCreationProps> = ({ isOpen, onClose,
   };
 
   const handleStartAnalysis = async () => {
-    if (!chatSession || photos.length === 0) return;
+    if (photos.length === 0) return;
+    
+    // If AI is not available, proceed with manual data to not block the user
+    if (!chatSession) {
+      setAiResult({
+        title: description.split('\n')[0].substring(0, 60),
+        description: description,
+        category: 'Други'
+      });
+      setStep('PREVIEW');
+      return;
+    }
+
     setStep('PROCESSING');
     setIsLoading(true);
     try {
       const response = await sendMessageToGemini(chatSession, description, photos[0]);
-      if (response.analysis) { setAiResult(response.analysis); setStep('PREVIEW'); }
-      else { setConversationHistory([{ role: 'ai', text: response.text }]); setStep('CLARIFICATION'); }
-    } finally { setIsLoading(false); }
+      if (response.analysis) { 
+        setAiResult(response.analysis); 
+        setStep('PREVIEW'); 
+      } else { 
+        setConversationHistory([{ role: 'ai', text: response.text }]); 
+        setStep('CLARIFICATION'); 
+      }
+    } catch (e) {
+      // Fallback on error
+      setAiResult({
+        title: description.split('\n')[0].substring(0, 60),
+        description: description,
+        category: 'Други'
+      });
+      setStep('PREVIEW');
+    } finally { 
+      setIsLoading(false); 
+    }
   };
 
   const handleAnswerSubmit = async () => {
