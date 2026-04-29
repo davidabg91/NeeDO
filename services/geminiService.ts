@@ -36,7 +36,7 @@ export const estimateTaskPrice = async (title: string, description: string): Pro
   try {
     const response = await ai.models.generateContent({
       model: 'gemini-2.5-flash',
-      contents: `Ти си експерт оценител на услуги в Европа. Задача: "${title}". Описание: "${description}". На база на пазарните цени за професионални услуги, дай ми само реалистичен ценови диапазон в ЕВРО (EUR). Формат: "XX - YY €". Ако не е възможно - "По договаряне".`,
+      contents: `Ти си експерт оценител на услуги в Европа. Задача: "${title}". Описание: "${description}". Дай ми само реалистичен ценови диапазон в ЕВРО (EUR). Формат: "XX - YY €". Ако не е възможно - "По договаряне".`,
     });
     return response.text.trim();
   } catch (error) {
@@ -55,28 +55,31 @@ export const sendMessageToGemini = async (
   
   try {
     const systemInstruction = `
-        ТИ СИ ЕКСПЕРТЕН АСИСТЕНТ (NEEDO AI). ТВОЯТА ЦЕЛ Е ДА СЪЗДАДЕШ ПЕРФЕКТНАТА ОБЯВА В 2 СТЪПКИ.
+        ТИ СИ ЕКСПЕРТЕН АСИСТЕНТ (NEEDO AI). ТВОЯТА ЦЕЛ Е ДА СЪЗДАДЕШ ПЕРФЕКТНАТА ОБЯВА ЗА УСЛУГА.
         
-        >>> ПРАВИЛО НА ДВЕТЕ СТЪПКИ <<<
-        1. СТЪПКА 1 (Първо съобщение): Задай САМО ЕДИН технически въпрос. БЕЗ JSON.
-        2. СТЪПКА 2 (След отговор): СЪБЕРИ ЦЯЛАТА ИНФОРМАЦИЯ (от началото на чата) и създай JSON. 
+        >>> ТВОЯТА ЗАДАЧА <<<
+        1. АНАЛИЗИРАЙ СНИМКАТА: Тя е твоят основен източник. Виж порода, модел, повреда, размери.
+        2. СЪБЕРИ ИНФО: Ако липсва нещо важно за майстора, ЗАДАЙ ЕДИН КРАТЪК ВЪПРОС.
+        3. ОФОРМИ ОБЯВАТА: Когато си готов, СЪЗДАЙ JSON ОБЕКТ.
         
-        >>> СТИЛ И ПЕРСПЕКТИВА <<<
-        - Пиши винаги от 1-во лице ("Търся...", "Кучето ми е...", "Дисплеят ми е...").
-        - НИКОГА не пиши "От снимката се вижда" или "Наблюдава се".
-        - БЕЗ ЛЮБЕЗНОСТИ. БЕЗ СЪВЕТИ.
+        >>> ПРАВИЛА ЗА ОФОРМЯНЕ НА ОБЯВАТА <<<
+        - ПЕРСПЕКТИВА: Пиши от името на КЛИЕНТА (1-во лице). Напр. "Търся...", "Кучето ми е...", "Проблемът е...".
+        - СТИЛ: Професионален, структуриран, с булети. Не преписвай чата, а го преработи в техническо задание.
+        - БЕЗ ФРАЗИ КАТО: "От снимката се вижда", "Потребителят каза". Директно описвай обекта.
         
         >>> ФОРМАТ JSON <<<
-        Връщай JSON обект: {"title": "...", "description": "...", "category": "..."}
+        {"title": "Кратко и ясно заглавие", "description": "Подробно и професионално описание", "category": "Категория"}
+        
+        НИКОГА не питай за локация или време.
     `;
 
-    // Map history to Gemini format
-    const contents: any[] = history.map(h => ({
+    // Map history and ensure the first message is prominent
+    const contents: any[] = history.map((h, i) => ({
       role: h.role === 'ai' ? 'model' : 'user',
-      parts: [{ text: h.text }]
+      parts: [{ text: (i === 0 ? "ОСНОВНА ЗАДАЧА: " : "") + h.text }]
     }));
 
-    // Add current message
+    // Add current message and image
     const currentParts: any[] = [{ text: message }];
     if (imageBase64) {
       currentParts.push({ inlineData: { mimeType: "image/jpeg", data: imageBase64.split(',')[1] } });
@@ -87,7 +90,6 @@ export const sendMessageToGemini = async (
       parts: currentParts
     });
 
-    // In 2026 SDK, we use systemInstruction parameter for persistent memory
     const response = await ai.models.generateContent({
       model: 'gemini-2.5-flash',
       systemInstruction: systemInstruction,
@@ -95,11 +97,9 @@ export const sendMessageToGemini = async (
     });
 
     const text = response.text;
-    
     let analysis: AIAnalysisResult | undefined;
     const jsonMatch = text.match(/\{[\s\S]*\}/);
     
-    // We expect JSON if we have history
     if (jsonMatch && contents.length > 1) {
       try {
         analysis = JSON.parse(jsonMatch[0]);
@@ -108,23 +108,21 @@ export const sendMessageToGemini = async (
 
     let cleanText = text.replace(/```json[\s\S]*?```/g, "").replace(/\{[\s\S]*\}/g, "").trim();
     
-    // Fallback logic if AI is lost but we have history
+    // Fallback logic if we are in Step 2 but no JSON
     if (contents.length > 1 && !analysis) {
-      // Find the first user message which contains the task
-      const firstTask = history.find(h => h.role === 'user')?.text || message;
-       return { 
-         text: "", 
-         analysis: { 
-           title: firstTask.substring(0, 50), 
-           description: `Търся услуга за: ${firstTask}\nДетайли: ${message}`, 
-           category: "Други" 
-         } 
-       };
+      const mainTask = history[0]?.text || message;
+      return { 
+        text: "", 
+        analysis: { 
+          title: mainTask.substring(0, 50), 
+          description: `Търся услуга за: ${mainTask}\nДетайли: ${message}`, 
+          category: "Други" 
+        } 
+      };
     }
 
     if (analysis) return { text: "", analysis };
-
-    return { text: cleanText || "Моля, дайте детайли за задачата.", analysis };
+    return { text: cleanText || "Моля, уточнете техническите детайли.", analysis };
   } catch (error: any) {
     console.error("Gemini Error:", error?.message || String(error));
     return { text: "", error: `Грешка от Google: ${error?.message || "Неуспешен анализ"}` };
