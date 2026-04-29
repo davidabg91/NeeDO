@@ -36,7 +36,7 @@ export const estimateTaskPrice = async (title: string, description: string): Pro
   try {
     const response = await ai.models.generateContent({
       model: 'gemini-2.5-flash',
-      contents: `Оцени задача: "${title}". Само цена в EUR.`,
+      contents: `Оцени цена за: "${title}". Само в EUR.`,
     });
     return response.text.trim();
   } catch (error) {
@@ -57,21 +57,20 @@ export const sendMessageToGemini = async (
     const questionCount = Math.floor(history.length / 2);
     
     const identityInstruction = `
-        ТИ СИ ЕКСПЕРТЕН АСИСТЕНТ НА NeeDO. СЛЕДВАЙ ТОЗИ СТРИКТЕН МИСЛОВЕН ПРОЦЕС:
+        ТИ СИ ЕКСПЕРТЕН АСИСТЕНТ НА NeeDO. ТВОЯТА ЦЕЛ Е ДА СЪБЕРЕШ ДЕТАЙЛИ ЗА ОБЯВА.
         
-        1. ПРОЧЕТИ ТЕКСТА: Разбери намерението на потребителя (напр. "смяна на дограма").
-        2. АНАЛИЗИРАЙ СНИМКАТА ПРЕЗ ПРИЗМАТА НА ТЕКСТА: Гледай снимката като майстор, който вече знае каква е задачата. Търси технически детайли, специфични за ТАЗИ задача.
-        3. СЪПОСТАВИ: Виж какво от написаното се потвърждава от снимката и какво ЛИПСВА за даването на точна оферта.
+        >>> ВАЖНО: НИКОГА НЕ ПРЕДПОЛАГАЙ КАТЕГОРИЯТА <<<
+        - Разбери каква е задачата ЕДИНСТВЕНО от първото съобщение на потребителя (напр. ако е за куче, не питай за строителство).
+        - Постави се на мястото на ИЗПЪЛНИТЕЛЯ на ТАЗИ конкретна услуга.
+        - АНАЛИЗИРАЙ СНИМКАТА спрямо задачата.
         
-        >>> ТВОЯТА РОЛЯ <<<
-        - Мисли като изпълнител. Забранено е да питаш за неща, които вече се виждат на снимката.
-        - Задавай по ЕДИН кратък технически въпрос на български.
-        
-        >>> СТРОГИ ПРАВИЛА <<<
+        >>> ПРАВИЛА <<<
         1. ВИНАГИ НА БЪЛГАРСКИ.
-        2. МАКСИМУМ 3 ВЪПРОСА. Ти си на въпрос ${questionCount + 1}.
-        3. БЕЗ ЛЮБЕЗНОСТИ И БЕЗ ОПИСАНИЯ НА СНИМКАТА.
+        2. МАКСИМУМ 3 КРАТКИ ВЪПРОСА (по един на съобщение).
+        3. БЕЗ ЛЮБЕЗНОСТИ. БЕЗ ОПИСАНИЯ НА СНИМКАТА.
         4. САМО ВЪПРОС ИЛИ JSON: {"title": "...", "description": "...", "category": "..."}
+        
+        НИКОГА не питай за локация или време.
     `;
 
     const contents: any[] = history.map((h, i) => ({
@@ -132,7 +131,7 @@ export const getOfferHelpQuestion = async (taskTitle: string, taskDesc: string):
   try {
     const response = await ai.models.generateContent({
       model: 'gemini-2.5-flash',
-      contents: `Въпрос на български за: "${taskTitle}".`,
+      contents: `Въпрос за задача: "${taskTitle}".`,
     });
     return response.text.trim();
   } catch (error) {
@@ -146,7 +145,7 @@ export const generateOfferPitch = async (taskTitle: string, providerAnswer: stri
   try {
     const response = await ai.models.generateContent({
       model: 'gemini-2.5-flash',
-      contents: `Оферта на български за: "${taskTitle}". Отговор: "${providerAnswer}".`,
+      contents: `Оферта за: "${taskTitle}". Отговор: "${providerAnswer}".`,
     });
     return response.text.trim();
   } catch (error) {
