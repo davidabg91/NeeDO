@@ -36,7 +36,7 @@ export const estimateTaskPrice = async (title: string, description: string): Pro
   try {
     const response = await ai.models.generateContent({
       model: 'gemini-2.5-flash',
-      contents: `Оцени цена за: "${title}". Само в EUR.`,
+      contents: `Ти си оценител. Задача: "${title}". ВЪРНИ САМО ЦЕНОВИ ДИАПАЗОН В EUR. БЕЗ ДРУГ ТЕКСТ. Формат: "XX - YY EUR".`,
     });
     return response.text.trim();
   } catch (error) {
@@ -57,29 +57,28 @@ export const sendMessageToGemini = async (
     const questionCount = Math.floor(history.length / 2);
     
     const identityInstruction = `
-        ТИ СИ ЕКСПЕРТЕН АСИСТЕНТ НА NeeDO. ТВОЯТА ЦЕЛ Е ДА СЪБЕРЕШ ДЕТАЙЛИ ЗА ОБЯВА.
+        ТИ СИ ЕКСПЕРТЕН АСИСТЕНТ НА NeeDO. ТВОЯТА ЦЕЛ Е ДА СЪЗДАДЕШ ОБЯВА.
         
-        >>> ВАЖНО: НИКОГА НЕ ПРЕДПОЛАГАЙ КАТЕГОРИЯТА <<<
-        - Разбери каква е задачата ЕДИНСТВЕНО от първото съобщение на потребителя (напр. ако е за куче, не питай за строителство).
-        - Постави се на мястото на ИЗПЪЛНИТЕЛЯ на ТАЗИ конкретна услуга.
-        - АНАЛИЗИРАЙ СНИМКАТА спрямо задачата.
+        >>> ВАЖНО (ПАМЕТ) <<<
+        - Първото съобщение в историята е ГЛАВНАТА ЗАДАЧА. Никога не я забравяй.
+        - Никога не питай "Какво търсите?", защото вече знаеш от историята.
         
         >>> ПРАВИЛА <<<
         1. ВИНАГИ НА БЪЛГАРСКИ.
-        2. МАКСИМУМ 3 КРАТКИ ВЪПРОСА (по един на съобщение).
-        3. БЕЗ ЛЮБЕЗНОСТИ. БЕЗ ОПИСАНИЯ НА СНИМКАТА.
-        4. САМО ВЪПРОС ИЛИ JSON: {"title": "...", "description": "...", "category": "..."}
+        2. МАКСИМУМ 3 КРАТКИ ТЕХНИЧЕСКИ ВЪПРОСА.
+        3. СЛЕД ОТГОВОР НА ВЪПРОС -> ВЪРНИ JSON С ОБЯВАТА.
+        4. ПЕРСПЕКТИВА: 1-во лице ("Търся...", "Кучето ми е...").
         
-        НИКОГА не питай за локация или време.
+        >>> ФОРМАТ JSON <<<
+        {"title": "...", "description": "...", "category": "..."}
     `;
 
     const contents: any[] = history.map((h, i) => ({
       role: h.role === 'ai' ? 'model' : 'user',
-      parts: [{ text: (i === 0 ? identityInstruction + "\n" : "") + h.text }]
+      parts: [{ text: (i === 0 ? "ОСНОВНА ЗАДАЧА: " : "") + h.text }]
     }));
 
-    const currentParts: any[] = [{ text: (contents.length === 0 ? identityInstruction + "\n" : "") + message }];
-    
+    const currentParts: any[] = [{ text: message }];
     if (imageBase64) {
       const mimeType = imageBase64.match(/data:([^;]+);/)?.[1] || "image/jpeg";
       const base64Data = imageBase64.split(',')[1];
@@ -111,14 +110,14 @@ export const sendMessageToGemini = async (
        const mainTask = history[0]?.text || message;
        analysis = { 
            title: mainTask.substring(0, 50), 
-           description: `Търся услуга за: ${mainTask}\nДетайли: ${message}`, 
+           description: `Търся помощ за: ${mainTask}\nДетайли: ${message}`, 
            category: "Други" 
        };
     }
 
     let cleanText = text.replace(/```json[\s\S]*?```/g, "").replace(/\{[\s\S]*\}/g, "").trim();
     if (analysis) return { text: "", analysis };
-    return { text: cleanText || "Какви са детайлите?", analysis };
+    return { text: cleanText || "Моля, дайте детайли.", analysis };
   } catch (error: any) {
     console.error("Gemini Error:", error?.message || String(error));
     return { text: "", error: "Грешка в анализа." };
@@ -131,7 +130,7 @@ export const getOfferHelpQuestion = async (taskTitle: string, taskDesc: string):
   try {
     const response = await ai.models.generateContent({
       model: 'gemini-2.5-flash',
-      contents: `Въпрос за задача: "${taskTitle}".`,
+      contents: `Кратък въпрос за: "${taskTitle}".`,
     });
     return response.text.trim();
   } catch (error) {
