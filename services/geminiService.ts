@@ -47,7 +47,8 @@ export const estimateTaskPrice = async (title: string, description: string): Pro
 export const sendMessageToGemini = async (
   chat: any, 
   message: string, 
-  imageBase64?: string | null
+  imageBase64?: string | null,
+  history: { role: 'ai' | 'user', text: string }[] = []
 ): Promise<{ text: string; analysis?: AIAnalysisResult; error?: string }> => {
   const ai = getAI();
   if (!ai) return { text: "", error: "AI услугата не е инициализирана." };
@@ -65,17 +66,35 @@ export const sendMessageToGemini = async (
         4. Ако липсва важна информация за майстора (размери, детайли), задай ЕДИН кратък въпрос.
         5. НИКОГА не питай за локация или време.
         
-        ПОТРЕБИТЕЛСКО ОПИСАНИЕ: ${message}
+        ВАЖНО: Помни целия контекст на разговора досега!
     `;
 
-    const parts: any[] = [systemPrompt];
-    if (imageBase64) {
-      parts.push({ inlineData: { mimeType: "image/jpeg", data: imageBase64.split(',')[1] } });
+    // Map history to Gemini format
+    const contents: any[] = history.map(h => ({
+      role: h.role === 'ai' ? 'model' : 'user',
+      parts: [{ text: h.text }]
+    }));
+
+    // Add current message with system prompt (if it's the first message) or just the prompt
+    const currentMessageParts: any[] = [];
+    if (contents.length === 0) {
+      currentMessageParts.push({ text: systemPrompt + "\n\nПОТРЕБИТЕЛСКО ОПИСАНИЕ: " + message });
+    } else {
+      currentMessageParts.push({ text: message });
     }
+
+    if (imageBase64) {
+      currentMessageParts.push({ inlineData: { mimeType: "image/jpeg", data: imageBase64.split(',')[1] } });
+    }
+
+    contents.push({
+      role: 'user',
+      parts: currentMessageParts
+    });
 
     const response = await ai.models.generateContent({
       model: 'gemini-2.5-flash',
-      contents: parts,
+      contents: contents,
     });
 
     const text = response.text;
