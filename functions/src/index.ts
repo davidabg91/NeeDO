@@ -35,7 +35,7 @@ export const createStripeAccount = functions.region('europe-west1').https.onRequ
       const userData = userDoc.data();
       let accountId = userData?.stripeAccountId;
 
-      // Create new Stripe Express account if none exists
+      // Create or update Stripe Express account
       if (!accountId) {
         const account = await stripe.accounts.create({
           type: "express",
@@ -45,6 +45,13 @@ export const createStripeAccount = functions.region('europe-west1').https.onRequ
           capabilities: {
             transfers: { requested: true },
           },
+          settings: {
+            payouts: {
+              schedule: {
+                interval: "manual",
+              },
+            },
+          },
         });
         accountId = account.id;
 
@@ -52,6 +59,16 @@ export const createStripeAccount = functions.region('europe-west1').https.onRequ
         await admin.firestore().collection("users").doc(userId).update({
           stripeAccountId: accountId,
         });
+      } else {
+        // If account exists, try to update business_type just in case the user changed their mind
+        // Note: Stripe Express sometimes restricts this after onboarding starts, but it's worth the call
+        try {
+          await stripe.accounts.update(accountId, {
+            business_type: accountType === "company" ? "company" : "individual",
+          });
+        } catch (updateError) {
+          console.warn("Could not update business_type for existing account", updateError);
+        }
       }
 
       // Create an Account Link for onboarding
