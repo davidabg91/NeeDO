@@ -2,6 +2,7 @@
 import { GoogleGenAI } from "@google/genai";
 import { AIAnalysisResult } from "../types";
 
+// EXACT INITIALIZATION FROM THE BACKUP
 let aiInstance: any = null;
 
 const getAI = () => {
@@ -27,34 +28,14 @@ const getAI = () => {
 };
 
 export const createTaskChatSession = () => {
-  return getAI();
-};
-
-export const estimateTaskPrice = async (title: string, description: string): Promise<string> => {
   const ai = getAI();
-  if (!ai) return "По договаряне";
-  try {
-    const response = await ai.models.generateContent({
-      model: 'gemini-2.5-flash',
-      contents: `Ти си експерт оценител на услуги в Европа. Задача: "${title}". Описание: "${description}". Дай ми само реалистичен ценови диапазон в ЕВРО (EUR). Формат: "XX - YY €". Ако не е възможно - "По договаряне".`,
-    });
-    return response.text.trim();
-  } catch (error) {
-    return "По договаряне";
-  }
-};
-
-export const sendMessageToGemini = async (
-  chat: any, 
-  message: string, 
-  imageBase64?: string | null,
-  history: { role: 'ai' | 'user', text: string }[] = []
-): Promise<{ text: string; analysis?: AIAnalysisResult; error?: string }> => {
-  const ai = getAI();
-  if (!ai) return { text: "", error: "AI услугата не е инициализирана." };
-  
-  try {
-    const systemInstruction = `
+  if (!ai) return null;
+  // EXACT MODEL AND CONFIG FROM THE BACKUP
+  return ai.chats.create({
+    model: 'gemini-3-flash-preview',
+    config: {
+      temperature: 0.2, 
+      systemInstruction: `
         ТИ СИ ЕКСПЕРТЕН АСИСТЕНТ (NEEDO AI). ТВОЯТА ЦЕЛ Е ДА СЪЗДАДЕШ ПЕРФЕКТНАТА ОБЯВА ЗА УСЛУГА.
 
         >>> 1. АНАЛИЗ НА СНИМКАТА (СУПЕР ПРИОРИТЕТ) <<<
@@ -73,35 +54,60 @@ export const sendMessageToGemini = async (
 
         >>> 4. КРАЕН РЕЗУЛТАТ (JSON) <<<
         Когато си готов, върни JSON обект. Описанието (description) трябва да е в 1-во лице.
-        JSON: {"title": "...", "description": "...", "category": "..."}
-    `;
 
-    const contents: any[] = history.map(h => ({
-      role: h.role === 'ai' ? 'model' : 'user',
-      parts: [{ text: h.text }]
-    }));
+        \`\`\`json
+        {
+          "title": "Заглавие",
+          "description": "Описание",
+          "category": "Категория"
+        }
+        \`\`\`
+      `,
+    },
+  });
+};
 
-    const currentParts: any[] = [{ text: message }];
+export const estimateTaskPrice = async (title: string, description: string): Promise<string> => {
+  const ai = getAI();
+  if (!ai) return "По договаряне";
+  try {
+    const response = await ai.models.generateContent({
+      model: 'gemini-3-flash-preview',
+      contents: `Ти си експерт оценител на услуги в Европа. Задача: "${title}". Описание: "${description}". Дай ми само реалистичен ценови диапазон в ЕВРО (EUR). Формат: "XX - YY €". Ако не е възможно - "По договаряне".`,
+    });
+    return response.text.trim();
+  } catch (error) {
+    return "По договаряне";
+  }
+};
+
+export const sendMessageToGemini = async (
+  chat: any, 
+  message: string, 
+  imageBase64?: string | null
+): Promise<{ text: string; analysis?: AIAnalysisResult; error?: string }> => {
+  if (!chat) return { text: "", error: "Чат сесията не е активна." };
+  
+  try {
+    const parts: any[] = [];
+    
     if (imageBase64) {
-      const mimeType = imageBase64.match(/data:([^;]+);/)?.[1] || "image/jpeg";
-      const base64Data = imageBase64.split(',')[1];
-      currentParts.push({ inlineData: { mimeType, data: base64Data } });
+      const base64Data = imageBase64.split(',')[1]; 
+      const mimeType = imageBase64.split(';')[0].split(':')[1] || "image/jpeg";
+      parts.push({ inlineData: { mimeType, data: base64Data } });
     }
 
-    contents.push({
-      role: 'user',
-      parts: currentParts
-    });
+    if (message) {
+      parts.push({ text: message });
+    }
 
-    const response = await ai.models.generateContent({
-      model: 'gemini-2.5-flash',
-      systemInstruction: systemInstruction,
-      contents: contents,
+    const result = await chat.sendMessage({ 
+      message: parts.length > 1 ? parts : (parts[0]?.text || message)
     });
-
-    const text = response.text || "";
     
-    // Robust parsing from the backup
+    const text = result.text || "";
+
+    // EXACT PARSING LOGIC FROM BACKUP
     let analysis: AIAnalysisResult | undefined;
     const jsonStart = text.indexOf('{');
     const jsonEnd = text.lastIndexOf('}');
@@ -116,10 +122,10 @@ export const sendMessageToGemini = async (
     let cleanText = text.replace(/```json[\s\S]*?```/g, "").replace(/\{[\s\S]*\}/g, "").trim();
 
     if (analysis) return { text: "", analysis };
-    return { text: cleanText || "Моля, дайте повече детайли.", analysis };
+    return { text: cleanText || (analysis ? "" : text), analysis };
   } catch (error: any) {
     console.error("Gemini Error:", error?.message || String(error));
-    return { text: "", error: "Възникна грешка при анализа. Опитайте отново." };
+    return { text: "", error: "Грешка при връзката с AI." };
   }
 };
 
@@ -128,25 +134,25 @@ export const getOfferHelpQuestion = async (taskTitle: string, taskDesc: string):
   if (!ai) return "Имате ли опит?";
   try {
     const response = await ai.models.generateContent({
-      model: 'gemini-2.5-flash',
+      model: 'gemini-3-flash-preview',
       contents: `Ти си клиентът. Задача: "${taskTitle}". Описание: "${taskDesc}". Задай ЕДИН кратък въпрос към майстора за неговия ОПИТ или ИНСТРУМЕНТИ.`,
     });
     return response.text.trim();
   } catch (error) {
-    return "Имате ли професионален опит?";
+    return "Имате ли опит?";
   }
 };
 
 export const generateOfferPitch = async (taskTitle: string, providerAnswer: string): Promise<string> => {
   const ai = getAI();
-  if (!ai) return `Разполагам с опит: ${providerAnswer}.`;
+  if (!ai) return `Опит: ${providerAnswer}.`;
   try {
     const response = await ai.models.generateContent({
-      model: 'gemini-2.5-flash',
+      model: 'gemini-3-flash-preview',
       contents: `Задача: "${taskTitle}". Майсторът отговори: "${providerAnswer}". Напиши кратко, професионално описание за оферта в 1-во лице. Без поздрави.`,
     });
     return response.text.trim();
   } catch (error) {
-    return `Разполагам с опит: ${providerAnswer}.`;
+    return `Опит: ${providerAnswer}.`;
   }
 };
