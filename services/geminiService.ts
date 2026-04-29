@@ -55,15 +55,26 @@ export const sendMessageToGemini = async (
   
   try {
     const systemPrompt = `
-        ТИ СИ ЕКСПЕРТЕН АСИСТЕНТ (NEEDO AI). ТВОЯТА ЦЕЛ Е ДА ГЕНЕРИРАШ ОБЯВА В JSON ФОРМАТ.
+        ТИ СИ ЕКСПЕРТЕН АСИСТЕНТ (NEEDO AI). ТВОЯТА ЦЕЛ Е ДА СЪЗДАДЕШ ПЕРФЕКТНАТА ОБЯВА.
         
-        ПРАВИЛА:
-        1. Ако имаш достатъчно информация за обявата (заглавие, категория и детайлно описание), ТРЯБВА да върнеш JSON обект.
-        2. JSON обектът ТРЯБВА да е в този формат: {"title": "...", "description": "...", "category": "..."}.
-        3. Ако ти липсва важна информация за майстора, задай ЕДИН КРАТЪК ВЪПРОС.
-        4. ВИНАГИ пиши описанието в 1-во лице ("Търся...", "Трябва ми...").
-        5. НИКОГА не пожелавай приятен ден и не води странични разговори. 
-        6. Ако потребителят ти даде отговор на въпрос, НЕ коментирай отговора, а веднага генерирай крайния JSON.
+        >>> ПРАВИЛО ЗА ВЪПРОСИ (ПРИОРИТЕТ) <<<
+        Ако в описанието или снимката липсват КРИТИЧНИ ТЕХНИЧЕСКИ ДЕТАЙЛИ, ти СИ ДЛЪЖЕН ДА ПОПИТАШ първо.
+        Примери за критични детайли:
+        - За кучета: приблизително тегло (кг), порода, агресивност/дърпане.
+        - За ремонти: размери (кв.м, линейни метри), материал на повърхността, нужни ли са материали.
+        - За почистване: брой стаи, силно замърсяване, има ли нужни препарати.
+        
+        >>> ЛОГИКА <<<
+        1. Ако НЯМАШ тези детайли -> Задай САМО ЕДИН конкретен въпрос.
+        2. Ако ИМАШ детайлите (или потребителят вече ти е отговорил) -> Върни JSON.
+        
+        >>> СТРОГИ ПРАВИЛА <<<
+        - БЕЗ ЛЮБЕЗНОСТИ ("Разбрах", "Чудесно").
+        - БЕЗ ОБЯСНЕНИЯ защо питаш.
+        - ПЕРСПЕКТИВА: Винаги от 1-во лице ("Търся...", "Трябва ми...").
+        - JSON ФОРМАТ: {"title": "...", "description": "...", "category": "..."}
+        
+        НИКОГА не питай за локация или време.
     `;
 
     const contents: any[] = history.map(h => ({
@@ -90,19 +101,15 @@ export const sendMessageToGemini = async (
     const response = await ai.models.generateContent({
       model: 'gemini-2.5-flash',
       contents: contents,
-      // Attempt to use system prompt parameter if supported in 2026, 
-      // but keeping it in the first message is safer for backward compatibility.
     });
 
     const text = response.text;
     
-    // Improved JSON detection
     let analysis: AIAnalysisResult | undefined;
     const jsonMatch = text.match(/\{[\s\S]*\}/);
     if (jsonMatch) {
       try {
         const parsed = JSON.parse(jsonMatch[0]);
-        // Validate JSON fields
         if (parsed.title && parsed.description) {
           analysis = parsed;
         }
@@ -110,26 +117,9 @@ export const sendMessageToGemini = async (
     }
 
     let cleanText = text.replace(/```json[\s\S]*?```/g, "").replace(/\{[\s\S]*\}/g, "").trim();
-    
-    // If we have analysis, we should transition. Ensure text is empty so UI knows it's an analysis.
-    if (analysis) {
-      return { text: "", analysis };
-    }
+    if (analysis) return { text: "", analysis };
 
-    // If AI failed to provide JSON but provided text, check if it's a "closing" text without JSON
-    if (cleanText.length < 50 && (cleanText.toLowerCase().includes("ден") || cleanText.toLowerCase().includes("късмет"))) {
-       // Forced JSON fallback if AI is being lazy
-       return { 
-         text: "", 
-         analysis: { 
-           title: message.substring(0, 50), 
-           description: message, 
-           category: "Други" 
-         } 
-       };
-    }
-
-    return { text: cleanText || "Моля, дайте повече подробности за задачата.", analysis };
+    return { text: cleanText || "Моля, дайте повече технически подробности за задачата.", analysis };
   } catch (error: any) {
     console.error("Gemini Error:", error?.message || String(error));
     return { text: "", error: `Грешка от Google: ${error?.message || "Неуспешен анализ"}` };
@@ -138,7 +128,7 @@ export const sendMessageToGemini = async (
 
 export const getOfferHelpQuestion = async (taskTitle: string, taskDesc: string): Promise<string> => {
   const ai = getAI();
-  if (!ai) return "Имате ли професионален опит с този тип задачи?";
+  if (!ai) return "Имате ли професионален опит with this task?";
   try {
     const response = await ai.models.generateContent({
       model: 'gemini-2.5-flash',
