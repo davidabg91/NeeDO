@@ -55,18 +55,19 @@ export const sendMessageToGemini = async (
   
   try {
     const systemPrompt = `
-        ТИ СИ ЕКСПЕРТЕН АСИСТЕНТ (NEEDO AI). ТВОЯТА ЦЕЛ Е ДА ИЗВЛЕЧЕШ ДЕТАЙЛИ И ДА СЪЗДАДЕШ ПЕРФЕКТНА ОБЯВА.
+        ТИ СИ ЕКСПЕРТЕН АСИСТЕНТ (NEEDO AI). ТВОЯТА ЦЕЛ Е ДА СЪЗДАДЕШ ОБЯВА В ТОЧНО 2 СТЪПКИ.
         
-        >>> ПРАВИЛА ЗА ПОВЕДЕНИЕ <<<
-        1. ЗАБРАНА ЗА ФИНАЛИЗИРАНЕ: При първото съобщение ТИ Е ЗАБРАНЕНО да връщаш JSON. ТРЯБВА да зададеш поне един уточняващ въпрос за технически детайли (кг, порода, характер, специфики на повредата).
-        2. ЧОВЕШКИ СТИЛ: Пиши обявата така, сякаш ПОТРЕБИТЕЛЯТ я е писал. НИКОГА не използвай фрази като "От снимката се вижда" или "Наблюдава се". Използвай: "Кучето ми е...", "Проблемът е...", "Търся някой за...".
-        3. МАЙСТОРСКИ ПОГЛЕД: Питай за нещата, които вълнуват майстора (тегло, материали, сложност).
+        >>> ПРАВИЛО НА ДВЕТЕ СТЪПКИ <<<
+        1. ПЪРВО СЪОБЩЕНИЕ: Задай САМО ЕДИН технически въпрос (кг, модел, детайл). ЗАБРАНЕНО е да даваш JSON сега.
+        2. ВТОРО СЪОБЩЕНИЕ (след отговор): СЪБЕРИ ВСИЧКО И ДАЙ JSON. ЗАБРАНЕНО е да питаш повече.
         
-        >>> ПРОЦЕС <<<
-        - СЪОБЩЕНИЕ 1: Анализирай снимката/текста и ЗАДАЙ ВЪПРОС.
-        - СЪОБЩЕНИЕ 2 (след отговор): Събери всичко и върни JSON: {"title": "...", "description": "...", "category": "..."}.
+        >>> СТИЛ И ПЕРСПЕКТИВА <<<
+        - Пиши винаги от 1-во лице ("Търся...", "Кучето ми е...", "Дисплеят ми е...").
+        - НИКОГА не пиши "От снимката се вижда" или "Наблюдава се".
+        - БЕЗ ЛЮБЕЗНОСТИ. БЕЗ СЪВЕТИ.
         
-        НИКОГА не питай за локация или време.
+        >>> ФОРМАТ JSON <<<
+        {"title": "...", "description": "...", "category": "..."}
     `;
 
     const contents: any[] = history.map(h => ({
@@ -100,7 +101,7 @@ export const sendMessageToGemini = async (
     let analysis: AIAnalysisResult | undefined;
     const jsonMatch = text.match(/\{[\s\S]*\}/);
     
-    // STRICT RULE: Only return JSON if it's NOT the first interaction
+    // Force JSON if we have history (meaning we already asked a question)
     if (jsonMatch && contents.length > 1) {
       try {
         analysis = JSON.parse(jsonMatch[0]);
@@ -108,9 +109,22 @@ export const sendMessageToGemini = async (
     }
 
     let cleanText = text.replace(/```json[\s\S]*?```/g, "").replace(/\{[\s\S]*\}/g, "").trim();
+    
+    // If we have history but AI failed to provide JSON, force create one
+    if (contents.length > 1 && !analysis) {
+       return { 
+         text: "", 
+         analysis: { 
+           title: message.substring(0, 50), 
+           description: history.map(h => h.text).join("\n") + "\n" + message, 
+           category: "Други" 
+         } 
+       };
+    }
+
     if (analysis) return { text: "", analysis };
 
-    return { text: cleanText || "Моля, дайте ми малко повече детайли, за да подготвя обявата.", analysis };
+    return { text: cleanText || "Моля, отговорете, за да завършим обявата.", analysis };
   } catch (error: any) {
     console.error("Gemini Error:", error?.message || String(error));
     return { text: "", error: `Грешка от Google: ${error?.message || "Неуспешен анализ"}` };
