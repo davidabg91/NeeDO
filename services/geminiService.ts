@@ -34,7 +34,7 @@ export const createTaskChatSession = (): Chat | null => {
   
   try {
     return ai.chats.create({
-      model: 'gemini-3-flash-preview',
+      model: 'gemini-1.5-flash',
       config: {
         temperature: 0.2, 
         systemInstruction: `
@@ -77,7 +77,7 @@ export const estimateTaskPrice = async (title: string, description: string): Pro
   if (!ai) return "По договаряне";
   try {
     const response = await ai.models.generateContent({
-      model: 'gemini-3-flash-preview',
+      model: 'gemini-1.5-flash',
       contents: `Ти си експерт оценител на услуги в Европа. Задача: "${title}". Описание: "${description}". Дай ми само реалистичен ценови диапазон в ЕВРО (EUR). Формат: "XX - YY €". Ако не е възможно - "По договаряне".`,
     });
     return response.text.trim();
@@ -139,7 +139,7 @@ export const getOfferHelpQuestion = async (taskTitle: string, taskDesc: string):
   if (!ai) return "Имате ли професионален опит с този тип задачи?";
   try {
     const response = await ai.models.generateContent({
-      model: 'gemini-3-flash-preview',
+      model: 'gemini-1.5-flash',
       contents: `Ти си клиентът. Задача: "${taskTitle}". Описание: "${taskDesc}". Задай ЕДИН кратък въпрос към майстора за неговия ОПИТ или ИНСТРУМЕНТИ.`,
     });
     return response.text.trim();
@@ -153,7 +153,7 @@ export const generateOfferPitch = async (taskTitle: string, providerAnswer: stri
   if (!ai) return `Разполагам с нужния опит: ${providerAnswer}.`;
   try {
     const response = await ai.models.generateContent({
-      model: 'gemini-3-flash-preview',
+      model: 'gemini-1.5-flash',
       contents: `Задача: "${taskTitle}". Майсторът отговори: "${providerAnswer}". Напиши кратко, професионално описание за оферта в 1-во лице. Без поздрави.`,
     });
     return response.text.trim();
