@@ -1,25 +1,20 @@
 
 import React, { useState, useEffect, useRef } from 'react';
-import { X, Send, Bot, Sparkles, Mic, MicOff, ArrowRight, Check, Camera, Loader2, Edit2, MapPin, Navigation, Search, User, Plus, Trash2, TrendingDown, Info, Image as ImageIcon } from 'lucide-react';
+import { X, Send, Bot, Sparkles, Mic, MicOff, ArrowRight, Check, Camera, Loader2, Edit2, MapPin, Navigation, Search, User, Plus, Trash2, TrendingDown, Info, Image as ImageIcon, Users, Clock, CalendarClock, Zap, Calendar, ListFilter, Target, ShieldCheck, Stars } from 'lucide-react';
 import { Chat } from '@google/genai';
 import { createTaskChatSession, sendMessageToGemini, estimateTaskPrice } from '../services/geminiService';
 import { AIAnalysisResult } from '../types';
+import { useLanguage } from '../contexts/LanguageContext';
+import { LocationPickerModal } from './LocationPickerModal';
 
 interface AIChatCreationProps {
   isOpen: boolean;
   onClose: () => void;
-  onTaskCreated: (data: AIAnalysisResult, images: string[], locationMode: 'GPS' | 'MANUAL', manualAddress?: string, manualCoordinates?: {lat: number, lng: number}, estimatedPrice?: string) => void;
+  onTaskCreated: (data: AIAnalysisResult, images: string[], locationMode: 'GPS' | 'MANUAL', manualAddress?: string, manualCoordinates?: { lat: number, lng: number }, estimatedPrice?: string, timing?: string) => void | Promise<void>;
   userLocation: [number, number] | null;
 }
 
 type WizardStep = 'INPUT_TEXT' | 'INPUT_PHOTO' | 'PROCESSING' | 'CLARIFICATION' | 'PREVIEW';
-
-interface AddressResult {
-  place_id: number;
-  display_name: string;
-  lat: string;
-  lon: string;
-}
 
 declare global {
   interface Window {
@@ -28,7 +23,6 @@ declare global {
   }
 }
 
-// Helper to compress images before upload to stay under Firestore 1MB limit
 const resizeImage = (file: File): Promise<string> => {
   return new Promise((resolve, reject) => {
     const reader = new FileReader();
@@ -36,794 +30,510 @@ const resizeImage = (file: File): Promise<string> => {
       const img = new Image();
       img.onload = () => {
         const canvas = document.createElement('canvas');
-        const MAX_SIZE = 1024; // Max dimension 1024px
+        const MAX_SIZE = 1024;
         let width = img.width;
         let height = img.height;
-        
-        if (width > height) {
-          if (width > MAX_SIZE) {
-            height *= MAX_SIZE / width;
-            width = MAX_SIZE;
-          }
-        } else {
-          if (height > MAX_SIZE) {
-            width *= MAX_SIZE / height;
-            height = MAX_SIZE;
-          }
-        }
+        if (width > height) { if (width > MAX_SIZE) { height *= MAX_SIZE / width; width = MAX_SIZE; } }
+        else { if (height > MAX_SIZE) { width *= MAX_SIZE / height; height = MAX_SIZE; } }
         canvas.width = width;
         canvas.height = height;
         const ctx = canvas.getContext('2d');
-        if (ctx) {
-            ctx.drawImage(img, 0, 0, width, height);
-            // Compress to JPEG with 0.6 quality
-            resolve(canvas.toDataURL('image/jpeg', 0.6));
-        } else {
-            reject(new Error("Canvas context not available"));
-        }
+        if (ctx) { ctx.drawImage(img, 0, 0, width, height); resolve(canvas.toDataURL('image/jpeg', 0.6)); }
+        else { reject(new Error("Canvas missing")); }
       };
-      img.onerror = (err) => reject(err);
+      img.onerror = () => reject(new Error("Image error"));
       img.src = e.target?.result as string;
     };
-    reader.onerror = (err) => reject(err);
     reader.readAsDataURL(file);
   });
 };
 
 export const AIChatCreation: React.FC<AIChatCreationProps> = ({ isOpen, onClose, onTaskCreated, userLocation }) => {
+  const { t } = useLanguage();
   const [step, setStep] = useState<WizardStep>('INPUT_TEXT');
-  
-  // Data
   const [description, setDescription] = useState('');
   const [photos, setPhotos] = useState<string[]>([]);
-  const [conversationHistory, setConversationHistory] = useState<{role: 'ai' | 'user', text: string}[]>([]);
+  const [conversationHistory, setConversationHistory] = useState<{ role: 'ai' | 'user', text: string }[]>([]);
   const [userAnswer, setUserAnswer] = useState('');
-  
-  // Location State
+  const [activeHint, setActiveHint] = useState(0);
   const [locationMode, setLocationMode] = useState<'GPS' | 'MANUAL'>('GPS');
   const [manualAddress, setManualAddress] = useState('');
-  const [manualCoords, setManualCoords] = useState<{lat: number, lng: number} | undefined>(undefined);
-  const [searchResults, setSearchResults] = useState<AddressResult[]>([]);
-  const [isSearchingAddress, setIsSearchingAddress] = useState(false);
-  
-  // State
+  const [manualCoords, setManualCoords] = useState<{ lat: number, lng: number } | undefined>(undefined);
+  const [isLocationPickerOpen, setIsLocationPickerOpen] = useState(false);
+  const [timingType, setTimingType] = useState<'ASAP' | 'SPECIFIC' | 'FLEXIBLE'>('ASAP');
+  const [specificDate, setSpecificDate] = useState('');
   const [chatSession, setChatSession] = useState<Chat | null>(null);
   const [isLoading, setIsLoading] = useState(false);
   const [isListening, setIsListening] = useState(false);
   const [aiResult, setAiResult] = useState<AIAnalysisResult | null>(null);
-
-  // Edit State
   const [isEditing, setIsEditing] = useState(false);
   const [tempTitle, setTempTitle] = useState('');
   const [tempDescription, setTempDescription] = useState('');
-
-  // Price Estimation Modal State
   const [showPriceModal, setShowPriceModal] = useState(false);
   const [isCalculatingPrice, setIsCalculatingPrice] = useState(false);
   const [estimatedPrice, setEstimatedPrice] = useState<string>('');
+  const [isPublishing, setIsPublishing] = useState(false);
 
   const recognitionRef = useRef<any>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const cameraInputRef = useRef<HTMLInputElement>(null);
-  const chatContainerRef = useRef<HTMLDivElement>(null);
 
-  // Reset on open
   useEffect(() => {
     if (isOpen) {
       setChatSession(createTaskChatSession());
-      setStep('INPUT_TEXT');
-      setDescription('');
-      setPhotos([]);
-      setConversationHistory([]);
-      setUserAnswer('');
-      setAiResult(null);
-      setIsLoading(false);
-      setIsEditing(false);
-      setLocationMode('GPS');
-      setManualAddress('');
-      setManualCoords(undefined);
-      setSearchResults([]);
-      setShowPriceModal(false);
-      setEstimatedPrice('');
+      setStep('INPUT_TEXT'); setDescription(''); setPhotos([]); setConversationHistory([]); setUserAnswer(''); setAiResult(null);
+      setIsLoading(false); setIsEditing(false);
+      setLocationMode(userLocation ? 'GPS' : 'MANUAL');
+      setManualAddress(''); setManualCoords(undefined);
+      setShowPriceModal(false); setEstimatedPrice(''); setActiveHint(0); setIsPublishing(false); setTimingType('ASAP'); setSpecificDate('');
     } else {
       setChatSession(null);
-      stopListening();
-      setIsEditing(false);
-      setShowPriceModal(false);
     }
   }, [isOpen]);
 
-  // Address Search Logic (Nominatim)
   useEffect(() => {
-    const delayDebounceFn = setTimeout(async () => {
-      if (locationMode === 'MANUAL' && manualAddress.length > 3 && !manualCoords) {
-        setIsSearchingAddress(true);
-        try {
-          // Limit to Bulgaria for this app context
-          const response = await fetch(`https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(manualAddress)}&countrycodes=bg&limit=5`);
-          const data = await response.json();
-          setSearchResults(data);
-        } catch (error) {
-          console.error("Error fetching addresses", error);
-        } finally {
-          setIsSearchingAddress(false);
-        }
-      } else {
-        setSearchResults([]);
-      }
-    }, 600);
+    if (isOpen && step === 'INPUT_TEXT') {
+      const interval = setInterval(() => setActiveHint(p => (p === 0 ? 1 : 0)), 5000);
+      return () => clearInterval(interval);
+    }
+  }, [isOpen, step]);
 
-    return () => clearTimeout(delayDebounceFn);
-  }, [manualAddress, locationMode, manualCoords]);
-
-  const selectAddress = (result: AddressResult) => {
-    setManualAddress(result.display_name);
-    setManualCoords({ lat: parseFloat(result.lat), lng: parseFloat(result.lon) });
-    setSearchResults([]); // Hide dropdown
-  };
-
-  const handleManualAddressChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    setManualAddress(e.target.value);
-    setManualCoords(undefined); // Reset coords when typing new text to force search
-  };
-
-  // Speech Recognition
   useEffect(() => {
     try {
-        const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
-        if (SpeechRecognition) {
-          const recognition = new SpeechRecognition();
-          recognition.continuous = false;
-          recognition.interimResults = false;
-          recognition.lang = 'bg-BG';
-
-          recognition.onstart = () => setIsListening(true);
-          recognition.onend = () => setIsListening(false);
-          recognition.onresult = (event: any) => {
-            const transcript = event.results[0][0].transcript;
-            if (step === 'INPUT_TEXT') {
-              setDescription(prev => prev + (prev ? ' ' : '') + transcript);
-            } else if (step === 'CLARIFICATION') {
-              setUserAnswer(prev => prev + (prev ? ' ' : '') + transcript);
-            }
-          };
-          recognition.onerror = (event: any) => {
-            console.error("Speech recognition error", event.error);
-            setIsListening(false);
-            if (event.error === 'not-allowed' || event.error === 'service-not-allowed') {
-                 // Silent fail or simple alert if user explicitly tried to use it
-            }
-          };
-          recognitionRef.current = recognition;
-        }
-    } catch (e) {
-        console.error("Speech Recognition initialization failed", e);
-    }
+      const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+      if (SpeechRecognition) {
+        const recognition = new SpeechRecognition();
+        recognition.lang = 'bg-BG';
+        recognition.onstart = () => setIsListening(true);
+        recognition.onend = () => setIsListening(false);
+        recognition.onresult = (e: any) => {
+          const transcript = e.results[0][0].transcript;
+          if (step === 'INPUT_TEXT') setDescription(p => p + (p ? ' ' : '') + transcript);
+          else if (step === 'CLARIFICATION') setUserAnswer(p => p + (p ? ' ' : '') + transcript);
+        };
+        recognitionRef.current = recognition;
+      }
+    } catch (e) { }
   }, [step]);
 
   const toggleListening = () => {
-    if (!recognitionRef.current) {
-      alert('Вашият браузър не поддържа гласово въвеждане или няма разрешение.');
-      return;
-    }
-    if (isListening) {
-      recognitionRef.current.stop();
-    } else {
-      try {
-         recognitionRef.current.start();
-      } catch(e) {
-         console.error("Mic start failed", e);
-      }
-    }
+    if (isListening) recognitionRef.current?.stop();
+    else recognitionRef.current?.start();
   };
 
-  const stopListening = () => {
-    if (isListening && recognitionRef.current) recognitionRef.current.stop();
-  };
-
-  // Handlers
   const handleFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
     if (e.target.files) {
-      const newFiles = Array.from(e.target.files);
-      const remainingSlots = 5 - photos.length;
-      const filesToProcess = newFiles.slice(0, remainingSlots);
-
-      for (const file of filesToProcess) {
-         try {
-             const resized = await resizeImage(file as File);
-             setPhotos(prev => [...prev, resized]);
-         } catch (err) {
-             console.error("Image resize failed", err);
-         }
+      const files = Array.from(e.target.files).slice(0, 5 - photos.length);
+      for (const f of files) {
+        if (f instanceof File) {
+          const res = await resizeImage(f);
+          setPhotos(prev => [...prev, res]);
+        }
       }
+      // Reset value to allow re-selecting the same file if needed
+      if (e.target) e.target.value = '';
     }
-    // Reset input
-    if (fileInputRef.current) fileInputRef.current.value = '';
-    if (cameraInputRef.current) cameraInputRef.current.value = '';
-  };
-
-  const removePhoto = (index: number) => {
-    setPhotos(prev => prev.filter((_, i) => i !== index));
   };
 
   const handleStartAnalysis = async () => {
-    if (!chatSession) return;
-    if (photos.length === 0) {
-        alert("Моля, добавете поне една снимка.");
-        return;
-    }
-    
+    if (!chatSession || photos.length === 0) return;
     setStep('PROCESSING');
     setIsLoading(true);
-
     try {
-      // Send the first photo for AI analysis
-      const response = await sendMessageToGemini(
-        chatSession,
-        description,
-        photos[0]
-      );
-
-      if (response.analysis) {
-        setAiResult(response.analysis);
-        setStep('PREVIEW');
-      } else {
-        setConversationHistory([{ role: 'ai', text: response.text }]);
-        setStep('CLARIFICATION');
-      }
-    } catch (error) {
-      console.error(error);
-      setConversationHistory([{ role: 'ai', text: "Възникна грешка. Моля, опитайте отново." }]);
-      setStep('CLARIFICATION');
-    } finally {
-      setIsLoading(false);
-    }
+      const response = await sendMessageToGemini(chatSession, description, photos[0]);
+      if (response.analysis) { setAiResult(response.analysis); setStep('PREVIEW'); }
+      else { setConversationHistory([{ role: 'ai', text: response.text }]); setStep('CLARIFICATION'); }
+    } finally { setIsLoading(false); }
   };
 
   const handleAnswerSubmit = async () => {
-    if (!chatSession || !userAnswer.trim()) return;
-    
+    if (!chatSession || !userAnswer.trim() || isLoading) return;
     const answer = userAnswer;
     setUserAnswer('');
     setConversationHistory(prev => [...prev, { role: 'user', text: answer }]);
     setIsLoading(true);
-    
     try {
       const response = await sendMessageToGemini(chatSession, answer, null);
-      
-      if (response.analysis) {
-        setAiResult(response.analysis);
-        setStep('PREVIEW');
-      } else {
-        setConversationHistory(prev => [...prev, { role: 'ai', text: response.text }]);
-      }
-    } catch (error) {
-      console.error(error);
-    } finally {
-      setIsLoading(false);
-    }
-  };
-
-  const startEditing = () => {
-    if (aiResult) {
-      setTempTitle(aiResult.title);
-      setTempDescription(aiResult.description);
-      setIsEditing(true);
-    }
-  };
-
-  const saveEditing = () => {
-    if (aiResult && tempTitle.trim() && tempDescription.trim()) {
-      setAiResult({
-        ...aiResult,
-        title: tempTitle,
-        description: tempDescription
-      });
-      setIsEditing(false);
-    }
+      if (response.analysis) { setAiResult(response.analysis); setStep('PREVIEW'); }
+      else { setConversationHistory(prev => [...prev, { role: 'ai', text: response.text }]); }
+    } finally { setIsLoading(false); }
   };
 
   const handleInitialPublish = async () => {
     if (!aiResult) return;
-    
-    // Start the Price Modal flow
-    setShowPriceModal(true);
-    setIsCalculatingPrice(true);
-    
-    // Calculate Price in background
-    try {
-        const price = await estimateTaskPrice(aiResult.title, aiResult.description);
-        setEstimatedPrice(price);
-    } catch (e) {
-        setEstimatedPrice("По договаряне");
-    } finally {
-        setIsCalculatingPrice(false);
-    }
+    setShowPriceModal(true); setIsCalculatingPrice(true);
+    try { const p = await estimateTaskPrice(aiResult.title, aiResult.description); setEstimatedPrice(p); }
+    catch (e) { setEstimatedPrice("По договаряне"); } finally { setIsCalculatingPrice(false); }
   };
 
-  const handleFinalConfirm = () => {
-    if (aiResult && photos.length > 0) {
-      onTaskCreated(aiResult, photos, locationMode, manualAddress, manualCoords, estimatedPrice);
-    }
+  const handleFinalConfirm = async () => {
+    if (isPublishing || !aiResult) return;
+    setIsPublishing(true);
+    let timingString = 'Възможно най-скоро';
+    if (timingType === 'FLEXIBLE') timingString = 'Гъвкаво / Не е спешно';
+    else if (timingType === 'SPECIFIC' && specificDate) timingString = `На ${new Date(specificDate).toLocaleString('bg-BG')}`;
+    try { await onTaskCreated(aiResult, photos, locationMode, manualAddress, manualCoords, estimatedPrice, timingString); }
+    catch (e) { setIsPublishing(false); }
   };
-
-  // Extract the latest AI message for the "Question" view
-  const latestAiMessage = conversationHistory.filter(m => m.role === 'ai').pop()?.text || '';
-  const previousQandA = conversationHistory.slice(0, -1); // Everything except the very last AI question (if AI spoke last)
 
   if (!isOpen) return null;
 
   return (
-    // Mobile: Full screen with no padding. Desktop: Center modal.
-    <div className="fixed inset-0 z-[60] flex items-end md:items-center justify-center bg-slate-900/60 backdrop-blur-md animate-in fade-in duration-200 p-0 md:p-4">
-      
-      {/* Main Creation Card - Full screen on mobile to avoid resize jittering */}
-      <div className={`w-full h-[100dvh] md:h-auto md:max-w-lg md:min-h-[550px] md:max-h-[90vh] md:rounded-[32px] bg-gradient-to-br from-sky-500 via-blue-600 to-indigo-900 text-white shadow-2xl flex flex-col relative transition-all duration-300 ${showPriceModal ? 'scale-95 opacity-50 blur-sm pointer-events-none' : 'scale-100 opacity-100'}`}>
-        
-        {/* Header */}
-        <div className="px-5 py-4 flex justify-between items-center z-10 border-b border-white/10 absolute top-0 left-0 w-full bg-white/5 backdrop-blur-md pt-safe-top overflow-hidden">
-          <div className="flex items-center gap-2.5">
-             <div className="w-9 h-9 rounded-full bg-white/20 backdrop-blur-md border border-white/20 flex items-center justify-center text-white shadow-lg">
-                <Bot size={18} />
-             </div>
-             <div>
-                 <h3 className="font-bold text-lg text-white leading-none">Needo AI</h3>
-                 <p className="text-[10px] text-blue-200 font-medium uppercase tracking-wide mt-0.5">Smart Assistant</p>
-             </div>
-          </div>
-          <button onClick={onClose} className="w-8 h-8 flex items-center justify-center hover:bg-white/10 rounded-full transition-colors text-blue-100 hover:text-white">
-            <X size={20} />
-          </button>
+    <div className="fixed inset-0 z-[60] flex items-end md:items-center justify-center bg-slate-950/40 backdrop-blur-xl p-0 md:p-6 overflow-hidden">
 
-          {/* Integrated Progress Bar inside Header */}
+      {/* Background Decorative Blur Blobs */}
+      <div className="absolute top-[10%] left-[15%] w-[30%] h-[30%] bg-blue-500/30 rounded-full blur-[100px] pointer-events-none animate-pulse"></div>
+      <div className="absolute bottom-[15%] right-[15%] w-[30%] h-[30%] bg-indigo-600/30 rounded-full blur-[100px] pointer-events-none animate-pulse" style={{ animationDelay: '2.5s' }}></div>
+
+      {/* Main Container - Removed dynamic transitions for smoother mobile experience */}
+      <div className="w-full md:max-w-md h-fit max-h-[95vh] md:rounded-[40px] bg-white/10 backdrop-blur-[60px] border border-white/20 text-white shadow-[0_32px_64px_-16px_rgba(0,0,0,0.4)] flex flex-col relative overflow-hidden ring-1 ring-white/10">
+
+        {/* Mirror Reflection Overlay */}
+        <div className="absolute inset-0 bg-gradient-to-tr from-white/5 to-transparent pointer-events-none z-0"></div>
+
+        {/* HEADER - More Compact */}
+        <div className="px-6 py-4 flex justify-between items-center z-10 border-b border-white/5 bg-white/5 backdrop-blur-md pt-safe-top overflow-hidden">
+          <div className="flex items-center gap-3">
+            <div className="w-9 h-9 rounded-xl bg-gradient-to-br from-blue-500 to-indigo-600 flex items-center justify-center text-white shadow-lg"><Bot size={18} /></div>
+            <div>
+              <h3 className="font-black text-base text-white leading-none tracking-tight">Needo AI</h3>
+              <p className="text-[8px] text-blue-300 font-bold uppercase tracking-[0.2em] mt-1">Smart Creation</p>
+            </div>
+          </div>
+          <button onClick={onClose} className="w-8 h-8 flex items-center justify-center hover:bg-white/10 rounded-full transition-all text-slate-300 active:scale-90"><X size={18} /></button>
+
+          {/* Progress Indicator */}
           {step !== 'PREVIEW' && (
-             <div className="absolute bottom-0 left-0 w-full h-[3px] bg-white/5">
-                <div 
-                  className="h-full bg-gradient-to-r from-sky-300 to-white shadow-[0_0_15px_rgba(255,255,255,0.8)] transition-all duration-500 ease-out"
-                  style={{
-                     width: step === 'INPUT_TEXT' ? '20%' :
-                            step === 'INPUT_PHOTO' ? '40%' :
-                            step === 'PROCESSING' ? '60%' :
-                            step === 'CLARIFICATION' ? '80%' : '100%'
-                  }}
-                ></div>
-             </div>
+            <div className="absolute bottom-0 left-0 w-full h-[1px] bg-white/5">
+              <div
+                className="h-full bg-blue-400 shadow-[0_0_8px_#60a5fa] transition-all duration-700 ease-in-out"
+                style={{ width: step === 'INPUT_TEXT' ? '25%' : step === 'INPUT_PHOTO' ? '50%' : step === 'PROCESSING' ? '75%' : '100%' }}
+              ></div>
+            </div>
           )}
         </div>
 
-        {/* Main Content Area */}
-        <div className="flex-1 flex flex-col pt-24 pb-safe-bottom px-6 overflow-y-auto scrollbar-hide">
-          
-          {/* STEP 1: TEXT INPUT */}
+        <div className="flex-1 flex flex-col pt-4 pb-safe-bottom px-6 overflow-y-auto scrollbar-hide relative z-10">
+
+          {/* PERSISTENT INPUTS FOR FILE UPLOAD - FIXED HERE */}
+          <input type="file" accept="image/*" multiple ref={fileInputRef} onChange={handleFileChange} className="hidden" />
+          <input type="file" accept="image/*" capture="environment" ref={cameraInputRef} onChange={handleFileChange} className="hidden" />
+
+          {/* STEP 1: TEXT INPUT - Minimal */}
           {step === 'INPUT_TEXT' && (
-            <div className="flex flex-col h-full animate-in slide-in-from-bottom duration-300">
-              <div className="mb-2 mt-2 shrink-0">
-                 <h2 className="text-2xl md:text-3xl font-black text-white mb-1 tracking-tight drop-shadow-sm">Какво да свършим?</h2>
-                 <p className="text-blue-100 font-medium text-sm">Опишете проблема накратко. AI ще попита за детайли.</p>
+            <div className="flex flex-col h-full animate-in slide-in-from-bottom-4 duration-500">
+              <div className="flex justify-between items-center mb-3">
+                <h2 className="text-2xl font-black tracking-tighter">{t('ai_step1_title')}</h2>
+                <span className="text-lg font-black text-blue-500 bg-blue-500/10 px-3 py-1 rounded-lg border border-blue-500/20">1/3</span>
               </div>
 
-              {/* Reduced height for mobile: Fixed h-24 (96px) on mobile, auto/flex on desktop */}
-              <div className="relative w-full h-24 md:h-auto md:flex-1 md:min-h-[180px]">
-                 <textarea
-                    value={description}
-                    onChange={(e) => setDescription(e.target.value)}
-                    placeholder="Например: Разходка на куче (Хъски) утре..."
-                    className="w-full h-full p-3 md:p-5 bg-white/10 border border-white/20 rounded-3xl text-base md:text-lg text-white placeholder-blue-200/50 focus:border-white/50 focus:bg-white/20 focus:ring-0 outline-none resize-none transition-all leading-relaxed backdrop-blur-sm shadow-inner"
-                    autoFocus
-                 />
-                 <button 
-                    onClick={toggleListening}
-                    className={`absolute bottom-2 right-2 p-2 md:p-3 md:bottom-4 md:right-4 rounded-2xl transition-all shadow-lg border border-white/10 ${
-                       isListening ? 'bg-red-500 text-white animate-pulse scale-110' : 'bg-white/10 text-white hover:bg-white/20 backdrop-blur-md'
-                    }`}
-                 >
-                    {isListening ? <MicOff size={18} /> : <Mic size={18} />}
-                 </button>
+              <div className="bg-white/5 rounded-2xl p-4 border border-white/10 backdrop-blur-md mb-4 relative overflow-hidden">
+                <div className="absolute top-0 right-0 w-20 h-20 bg-blue-500/20 blur-xl rounded-full -mr-10 -mt-10 pointer-events-none"></div>
+                <h4 className="text-xs font-black text-white uppercase tracking-wide mb-2 relative z-10">Създай задача в 3 лесни и бързи стъпки!</h4>
+                <div className="flex items-start gap-3 relative z-10">
+                  <Stars size={14} className="text-blue-400 mt-0.5 shrink-0" />
+                  <p className="text-[10px] text-blue-100 font-medium leading-normal">
+                    {activeHint === 0 ? t('ai_hint1_desc') : t('ai_hint2_desc')}
+                  </p>
+                </div>
               </div>
 
-              <button 
+              <div className="relative mb-4 bg-white/5 border border-white/10 rounded-[24px] focus-within:bg-white/10 transition-all">
+                <textarea
+                  value={description}
+                  onChange={(e) => setDescription(e.target.value)}
+                  placeholder={t('ai_input_ph')}
+                  className="w-full h-32 p-5 pr-14 bg-transparent border-none text-white text-sm font-medium focus:ring-0 outline-none resize-none"
+                  autoFocus
+                />
+                <button
+                  onClick={toggleListening}
+                  className={`absolute bottom-4 right-4 p-3 rounded-xl transition-all ${isListening ? 'bg-red-500 animate-pulse' : 'bg-white/10 hover:bg-white/20'}`}
+                >
+                  {isListening ? <MicOff size={18} /> : <Mic size={18} />}
+                </button>
+              </div>
+
+              <button
                 onClick={() => setStep('INPUT_PHOTO')}
                 disabled={!description.trim()}
-                className="mt-3 md:mt-6 w-full py-3 md:py-4 bg-white text-blue-700 rounded-2xl text-lg font-black hover:bg-blue-50 disabled:opacity-50 disabled:cursor-not-allowed transition-all flex items-center justify-center gap-2 shadow-xl transform active:scale-[0.98] shrink-0"
+                className="mb-4 w-full py-4 bg-white text-slate-900 rounded-[20px] text-sm font-black disabled:opacity-30 transition-all flex items-center justify-center gap-2 shadow-xl"
               >
-                Напред <ArrowRight size={20} />
+                {t('ai_btn_next')} <ArrowRight size={16} />
               </button>
             </div>
           )}
 
-          {/* STEP 2: PHOTO INPUT */}
+          {/* STEP 2: PHOTO UPLOAD - Minimal Grid */}
           {step === 'INPUT_PHOTO' && (
-            <div className="flex flex-col h-full animate-in slide-in-from-right duration-300">
-               <div className="mb-4 text-center mt-4">
-                 <h2 className="text-2xl font-bold text-white mb-1">Добавете снимки</h2>
-                 <p className="text-blue-200 text-sm">Снимките са задължителни (до 5 броя).</p>
+            <div className="flex flex-col h-full animate-in slide-in-from-right-4 duration-500">
+              <div className="flex justify-between items-center mb-4 px-1">
+                <h2 className="text-2xl font-black tracking-tighter">{t('ai_step2_title')}</h2>
+                <span className="text-lg font-black text-blue-500 bg-blue-500/10 px-3 py-1 rounded-lg border border-blue-500/20">2/3</span>
+              </div>
+              <p className="text-slate-400 text-[10px] font-medium text-center mb-4">{t('ai_photo_hint_desc')}</p>
+
+              <div className="grid grid-cols-2 gap-3 mb-4 content-start overflow-y-auto scrollbar-hide">
+                {photos.map((p, i) => (
+                  <div key={i} className="relative aspect-square rounded-[24px] overflow-hidden border border-white/10 shadow-sm">
+                    <img src={p} className="w-full h-full object-cover" alt="" />
+                    <button onClick={() => setPhotos(photos.filter((_, idx) => idx !== i))} className="absolute top-2 right-2 bg-red-500/80 p-1.5 rounded-lg text-white"><Trash2 size={14} /></button>
+                  </div>
+                ))}
+
+                {photos.length < 5 && (
+                  <>
+                    <button onClick={() => cameraInputRef.current?.click()} className="aspect-square bg-white/5 border border-dashed border-white/20 rounded-[24px] flex flex-col items-center justify-center gap-2 hover:bg-white/10 transition-all">
+                      <Camera size={20} className="text-blue-400" />
+                      <span className="text-[9px] font-black uppercase text-slate-300">{t('ai_btn_camera')}</span>
+                    </button>
+                    <button onClick={() => fileInputRef.current?.click()} className="aspect-square bg-white/5 border border-dashed border-white/20 rounded-[24px] flex flex-col items-center justify-center gap-2 hover:bg-white/10 transition-all">
+                      <ImageIcon size={20} className="text-indigo-400" />
+                      <span className="text-[9px] font-black uppercase text-slate-300">{t('ai_btn_gallery')}</span>
+                    </button>
+                  </>
+                )}
               </div>
 
-              {/* Hidden Inputs */}
-              <input 
-                type="file" 
-                accept="image/*" 
-                multiple
-                ref={fileInputRef}
-                onChange={handleFileChange}
-                className="hidden"
-              />
-              <input 
-                type="file" 
-                accept="image/*" 
-                capture="environment"
-                ref={cameraInputRef}
-                onChange={handleFileChange}
-                className="hidden"
-              />
-
-              <div className="flex-1 overflow-y-auto">
-                 {/* Photo Grid */}
-                 <div className="grid grid-cols-2 gap-3 mb-4">
-                    {photos.map((photo, index) => (
-                        <div key={index} className="relative aspect-square rounded-2xl overflow-hidden shadow-lg border border-white/20 group">
-                            <img src={photo} className="w-full h-full object-cover" alt={`Upload ${index}`} />
-                            <button 
-                                onClick={() => removePhoto(index)}
-                                className="absolute top-2 right-2 bg-red-500/90 backdrop-blur text-white p-1.5 rounded-full shadow-md hover:bg-red-600 transition-colors"
-                            >
-                                <Trash2 size={14} />
-                            </button>
-                            {index === 0 && (
-                                <div className="absolute bottom-2 left-2 bg-black/50 backdrop-blur text-white text-[10px] font-bold px-2 py-0.5 rounded-lg">
-                                    Основна
-                                </div>
-                            )}
-                        </div>
-                    ))}
-                 </div>
-                 
-                 {/* Action Buttons */}
-                 {photos.length < 5 && (
-                     <div className="flex gap-3 mb-4">
-                        <button 
-                            onClick={() => fileInputRef.current?.click()}
-                            className="flex-1 py-4 bg-white/10 hover:bg-white/20 border border-white/20 rounded-2xl flex flex-col items-center justify-center gap-2 transition-all transform active:scale-95"
-                        >
-                            <div className="w-10 h-10 bg-white/20 rounded-full flex items-center justify-center text-white">
-                                <ImageIcon size={20} />
-                            </div>
-                            <span className="text-xs font-bold text-blue-100">Галерия</span>
-                        </button>
-                        <button 
-                            onClick={() => cameraInputRef.current?.click()}
-                            className="flex-1 py-4 bg-white/10 hover:bg-white/20 border border-white/20 rounded-2xl flex flex-col items-center justify-center gap-2 transition-all transform active:scale-95"
-                        >
-                            <div className="w-10 h-10 bg-white/20 rounded-full flex items-center justify-center text-white">
-                                <Camera size={20} />
-                            </div>
-                            <span className="text-xs font-bold text-blue-100">Камера</span>
-                        </button>
-                     </div>
-                 )}
-
-                 {photos.length === 0 && (
-                     <div className="text-center py-4 text-blue-200/50">
-                        <p className="text-sm font-medium">Моля качете поне една снимка,<br/>за да продължите.</p>
-                     </div>
-                 )}
-              </div>
-
-              <div className="mt-auto">
-                <button 
-                    onClick={handleStartAnalysis}
-                    disabled={photos.length === 0}
-                    className="w-full py-4 bg-white text-blue-700 rounded-2xl text-lg font-black hover:bg-blue-50 transition-all flex items-center justify-center gap-2 shadow-xl disabled:opacity-50 disabled:cursor-not-allowed disabled:shadow-none"
-                >
-                    <Sparkles size={20} className="fill-blue-700" /> Анализирай
-                </button>
-              </div>
+              <button onClick={handleStartAnalysis} disabled={photos.length === 0} className="mb-4 w-full py-4 bg-gradient-to-r from-blue-600 to-indigo-600 text-white rounded-[20px] text-sm font-black shadow-xl disabled:opacity-30">
+                <Sparkles size={18} className="inline mr-2" /> {t('ai_btn_analyze')}
+              </button>
             </div>
           )}
 
           {/* STEP 3: PROCESSING */}
           {step === 'PROCESSING' && (
-             <div className="flex-1 flex flex-col items-center justify-center text-center animate-in fade-in duration-500">
-                <div className="relative mb-8">
-                   <div className="w-24 h-24 rounded-full border-[6px] border-white/10"></div>
-                   <div className="absolute inset-0 border-[6px] border-white rounded-full border-t-transparent animate-spin"></div>
-                   <div className="absolute inset-0 flex items-center justify-center">
-                      <Bot size={32} className="text-white" />
-                   </div>
-                </div>
-                <h3 className="text-2xl font-bold text-white mb-2">Анализиране...</h3>
-                <p className="text-blue-200 font-medium text-sm max-w-xs mx-auto">Проверявам за липсващи детайли.</p>
-             </div>
+            <div className="flex-1 flex flex-col items-center justify-center py-10 text-center animate-in fade-in">
+              <div className="relative mb-6">
+                <div className="w-16 h-16 border-[2px] border-white/10 border-t-blue-400 rounded-full animate-spin"></div>
+                <Bot size={28} className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 text-blue-400 animate-pulse" />
+              </div>
+              <h3 className="text-xl font-black mb-1 tracking-tighter">{t('ai_processing_title')}</h3>
+              <p className="text-slate-400 text-xs font-medium">{t('ai_processing_desc')}</p>
+            </div>
           )}
 
           {/* STEP 4: CLARIFICATION */}
           {step === 'CLARIFICATION' && (
-             <div className="flex flex-col h-full animate-in slide-in-from-right duration-300">
-                
-                {/* Collapsed History */}
-                <div className="mb-2 space-y-2 opacity-60 hover:opacity-100 transition-opacity max-h-24 md:max-h-32 overflow-y-auto scrollbar-thin pr-2">
-                   {previousQandA.map((msg, idx) => (
-                      <div key={idx} className={`flex gap-2 ${msg.role === 'ai' ? 'flex-row' : 'flex-row-reverse'}`}>
-                         <div className={`p-2 rounded-lg text-xs font-medium ${
-                            msg.role === 'ai' ? 'bg-white/20 text-white' : 'bg-blue-500/50 text-white'
-                         }`}>
-                           {msg.text}
-                         </div>
-                      </div>
-                   ))}
-                </div>
-
-                {/* Main Question Area */}
-                <div className="flex-1 flex flex-col">
-                    <div className="mb-2 mt-1">
-                       {isLoading ? (
-                          <div className="flex items-center gap-3 text-blue-200 animate-pulse">
-                             <div className="w-6 h-6 border-2 border-current border-t-transparent rounded-full animate-spin"></div>
-                             <span className="font-bold text-xl">Обработка...</span>
-                          </div>
-                       ) : (
-                          <h2 className="text-xl md:text-3xl font-black text-white leading-tight animate-in fade-in slide-in-from-bottom-2 drop-shadow-md line-clamp-3">
-                            {latestAiMessage}
-                          </h2>
-                       )}
-                       {!isLoading && <p className="text-blue-200 font-medium text-xs mt-1 uppercase tracking-wide">Въпрос от асистента</p>}
-                    </div>
-
-                    <div className="relative w-full h-24 md:h-auto md:flex-1 md:min-h-[180px]">
-                       <textarea
-                          value={userAnswer}
-                          onChange={(e) => setUserAnswer(e.target.value)}
-                          onKeyDown={(e) => e.key === 'Enter' && !e.shiftKey && (e.preventDefault(), handleAnswerSubmit())}
-                          placeholder="Напишете отговор..."
-                          className="w-full h-full p-3 md:p-5 bg-white/10 border border-white/20 rounded-3xl text-base md:text-lg text-white placeholder-blue-200/50 focus:border-white/50 focus:bg-white/20 focus:ring-0 outline-none resize-none transition-all leading-relaxed backdrop-blur-sm"
-                          autoFocus
-                       />
-                       <button 
-                          onClick={toggleListening}
-                          className={`absolute bottom-2 right-2 p-2 md:p-3 md:bottom-4 md:right-4 rounded-2xl transition-all shadow-lg border border-white/10 ${
-                             isListening ? 'bg-red-500 text-white animate-pulse scale-110' : 'bg-white/10 text-white hover:bg-white/20 backdrop-blur-md'
-                          }`}
-                       >
-                          {isListening ? <MicOff size={18} /> : <Mic size={18} />}
-                       </button>
-                    </div>
-
-                    <button 
-                      onClick={handleAnswerSubmit}
-                      disabled={!userAnswer.trim() || isLoading}
-                      className="mt-3 md:mt-4 w-full py-3 md:py-4 bg-white text-blue-700 rounded-2xl text-lg font-black hover:bg-blue-50 disabled:opacity-50 disabled:cursor-not-allowed transition-all flex items-center justify-center gap-2 shadow-xl transform active:scale-[0.98] shrink-0"
-                    >
-                      Изпрати <ArrowRight size={20} />
-                    </button>
-                </div>
-             </div>
+            <div className="flex flex-col h-full animate-in slide-in-from-right-4 duration-500">
+              <div className="mb-4">
+                <div className="inline-block px-2 py-0.5 rounded-lg bg-blue-500/10 border border-blue-500/20 text-[8px] font-black text-blue-400 uppercase tracking-widest mb-2">AI Assistant</div>
+                <h2 className="text-lg font-black leading-tight tracking-tight">{conversationHistory.filter(m => m.role === 'ai').pop()?.text}</h2>
+              </div>
+              <div className="relative mb-4 bg-white/5 border border-white/10 rounded-[24px]">
+                <textarea value={userAnswer} onChange={(e) => setUserAnswer(e.target.value)} onKeyDown={(e) => e.key === 'Enter' && !e.shiftKey && !isLoading && (e.preventDefault(), handleAnswerSubmit())} disabled={isLoading} placeholder={t('ai_q_ph')} className="w-full h-24 p-5 bg-transparent border-none text-white text-sm outline-none resize-none disabled:opacity-50" autoFocus />
+                <button onClick={toggleListening} disabled={isLoading} className={`absolute bottom-3 right-3 p-3 rounded-xl ${isListening ? 'bg-red-500 animate-pulse' : 'bg-white/10'}`}>{isListening ? <MicOff size={18} /> : <Mic size={18} />}</button>
+              </div>
+              <button onClick={handleAnswerSubmit} disabled={!userAnswer.trim() || isLoading} className="mb-4 w-full py-4 bg-white text-slate-900 rounded-[20px] text-sm font-black disabled:opacity-30">
+                {isLoading ? <Loader2 size={18} className="animate-spin mx-auto" /> : <><Send size={18} className="inline mr-2" /> {t('ai_btn_send')}</>}
+              </button>
+            </div>
           )}
 
-          {/* STEP 5: PREVIEW */}
+          {/* STEP 5: PREVIEW - Compacted but fully readable */}
           {step === 'PREVIEW' && aiResult && (
-             <div className="flex flex-col h-full animate-in slide-in-from-bottom duration-300">
-                {!isEditing && (
-                    <div className="text-center mb-4">
-                       <h2 className="text-xl font-bold text-white flex items-center justify-center gap-2">
-                          <CheckCircleIcon /> Готово!
-                       </h2>
+            <div className="flex flex-col h-full animate-in slide-in-from-bottom-4 duration-500 pb-4">
+              <div className="bg-white/5 border border-white/10 rounded-[28px] p-5 mb-4 relative overflow-hidden group shadow-inner">
+                {isEditing ? (
+                  <div className="space-y-3 animate-in fade-in">
+                    <input type="text" value={tempTitle} onChange={e => setTempTitle(e.target.value)} className="w-full p-3 bg-white/5 border border-white/10 rounded-xl text-white outline-none text-xs font-bold" />
+                    <textarea value={tempDescription} onChange={e => setTempDescription(e.target.value)} rows={5} className="w-full p-3 bg-white/5 border border-white/10 rounded-xl text-white outline-none resize-none text-[11px]" />
+                    <div className="flex gap-2">
+                      <button onClick={() => { setAiResult({ ...aiResult, title: tempTitle, description: tempDescription }); setIsEditing(false); }} className="flex-1 py-3 bg-blue-600 rounded-xl font-bold text-[11px]">Запази</button>
+                      <button onClick={() => setIsEditing(false)} className="px-5 py-3 bg-white/10 rounded-xl font-bold text-[11px]">Отказ</button>
                     </div>
-                )}
-
-                <div className="bg-white/10 backdrop-blur-md border border-white/20 rounded-2xl p-5 shadow-lg mb-4 relative overflow-hidden shrink-0">
-                   <div className="space-y-3">
-                      {isEditing ? (
-                          <div className="animate-in fade-in duration-200">
-                              <div className="mb-3">
-                                  <label className="text-[10px] font-bold text-blue-200 uppercase mb-1 block">Заглавие</label>
-                                  <input 
-                                      type="text" 
-                                      value={tempTitle}
-                                      onChange={(e) => setTempTitle(e.target.value)}
-                                      className="w-full p-3 bg-white/10 border border-white/20 rounded-xl font-bold text-sm text-white focus:border-white/50 outline-none"
-                                  />
-                              </div>
-                              <div className="mb-3">
-                                  <label className="text-[10px] font-bold text-blue-200 uppercase mb-1 block">Описание</label>
-                                  <textarea 
-                                      value={tempDescription}
-                                      onChange={(e) => setTempDescription(e.target.value)}
-                                      rows={5}
-                                      className="w-full p-3 bg-white/10 border border-white/20 rounded-xl text-sm text-white focus:border-white/50 outline-none resize-none leading-relaxed"
-                                  />
-                              </div>
-                              <div className="flex gap-3">
-                                  <button onClick={saveEditing} className="flex-1 py-2.5 bg-white text-blue-600 rounded-xl font-bold text-sm shadow-sm hover:bg-blue-50">Запази</button>
-                                  <button onClick={() => setIsEditing(false)} className="px-6 py-2.5 bg-white/10 text-white border border-white/20 rounded-xl font-bold text-sm hover:bg-white/20">Отказ</button>
-                              </div>
-                          </div>
-                      ) : (
-                          <>
-                            <div className="flex justify-between items-start gap-4">
-                               <div>
-                                  <h3 className="text-lg font-bold text-white leading-tight mb-1.5">{aiResult.title}</h3>
-                                  <span className="bg-white/20 px-2.5 py-1 rounded-lg text-[10px] font-bold text-white uppercase tracking-wide border border-white/10">{aiResult.category}</span>
-                               </div>
-                               <button onClick={startEditing} className="p-2 text-white bg-white/10 rounded-full hover:bg-white/20 transition-colors shrink-0"><Edit2 size={16} /></button>
-                            </div>
-                            <div className="bg-black/10 p-4 rounded-2xl border border-white/10 text-sm text-blue-50 leading-relaxed max-h-32 overflow-y-auto scrollbar-thin">
-                               {aiResult.description}
-                            </div>
-                            <div className="flex gap-2 mt-2 overflow-x-auto pb-1">
-                                {photos.map((p, i) => (
-                                    <img key={i} src={p} className="w-12 h-12 rounded-lg object-cover border border-white/20" alt="" />
-                                ))}
-                            </div>
-                          </>
-                      )}
-                   </div>
-                </div>
-
-                {/* Location Selector */}
-                {!isEditing && (
-                  <div className="mb-4 animate-in slide-in-from-bottom delay-100 flex-1 flex flex-col min-h-0 relative z-50">
-                     <label className="text-[10px] font-bold text-blue-200 uppercase mb-2 block ml-1">Къде ще се изпълнява задачата?</label>
-                     
-                     <div className="bg-black/20 p-1.5 rounded-2xl flex gap-1 shrink-0 mb-3 relative z-50 backdrop-blur-sm">
-                        <button 
-                           onClick={() => setLocationMode('GPS')}
-                           className={`flex-1 py-2.5 rounded-xl text-xs font-bold flex items-center justify-center gap-2 transition-all ${
-                              locationMode === 'GPS' 
-                              ? 'bg-white text-slate-900 shadow-lg' 
-                              : 'text-blue-200 hover:text-white hover:bg-white/5'
-                           }`}
-                        >
-                           <Navigation size={14} className={locationMode === 'GPS' ? 'text-blue-500' : ''} />
-                           GPS Локация
-                        </button>
-                        <button 
-                           onClick={() => setLocationMode('MANUAL')}
-                           className={`flex-1 py-2.5 rounded-xl text-xs font-bold flex items-center justify-center gap-2 transition-all ${
-                              locationMode === 'MANUAL' 
-                              ? 'bg-white text-slate-900 shadow-lg' 
-                              : 'text-blue-200 hover:text-white hover:bg-white/5'
-                           }`}
-                        >
-                           <MapPin size={14} className={locationMode === 'MANUAL' ? 'text-blue-500' : ''} />
-                           Посочи Адрес
-                        </button>
-                     </div>
-                     
-                     {locationMode === 'MANUAL' && (
-                        <div className="animate-in fade-in slide-in-from-top-2 relative z-50">
-                           <div className="relative">
-                              <Search className="absolute left-4 top-1/2 -translate-y-1/2 text-gray-400 pointer-events-none" size={18} />
-                              <input 
-                                 type="text"
-                                 value={manualAddress}
-                                 onChange={handleManualAddressChange}
-                                 placeholder="Въведете град, квартал или улица..."
-                                 className={`w-full pl-11 pr-10 py-3.5 bg-white border-2 rounded-2xl text-sm font-medium text-slate-800 focus:border-white outline-none placeholder:text-slate-400 transition-all shadow-lg ${manualCoords ? 'border-green-500/50 ring-4 ring-green-500/20' : 'border-transparent'}`}
-                                 autoFocus
-                              />
-                              {isSearchingAddress && (
-                                 <div className="absolute right-3 top-1/2 -translate-y-1/2">
-                                    <Loader2 size={18} className="animate-spin text-blue-500" />
-                                 </div>
-                              )}
-                              {manualCoords && !isSearchingAddress && (
-                                 <div className="absolute right-3 top-1/2 -translate-y-1/2 text-green-500">
-                                    <Check size={18} strokeWidth={3} />
-                                 </div>
-                              )}
-                           </div>
-
-                           {/* Autocomplete Dropdown */}
-                           {searchResults.length > 0 && (
-                              <div className="absolute top-[calc(100%+6px)] left-0 w-full bg-white border border-slate-200 rounded-2xl shadow-xl max-h-[180px] overflow-y-auto z-[60] divide-y divide-slate-50 animate-in fade-in zoom-in-95 duration-150">
-                                 {searchResults.map((result) => (
-                                    <button
-                                       key={result.place_id}
-                                       onClick={() => selectAddress(result)}
-                                       className="w-full text-left px-4 py-3 hover:bg-blue-50 transition-colors text-sm text-slate-700 flex items-start gap-3 group"
-                                    >
-                                       <div className="mt-0.5 bg-slate-100 p-1 rounded-md group-hover:bg-blue-100 group-hover:text-blue-600 transition-colors text-slate-400">
-                                          <MapPin size={14} />
-                                       </div>
-                                       <span className="line-clamp-2 font-medium">{result.display_name}</span>
-                                    </button>
-                                 ))}
-                              </div>
-                           )}
-                        </div>
-                     )}
-                     
-                     {locationMode === 'GPS' && (
-                        <div className="bg-white/10 border border-white/20 rounded-2xl p-4 text-center backdrop-blur-sm">
-                            <p className="text-sm font-bold text-white mb-1">Използване на текуща локация</p>
-                            <p className="text-xs text-blue-100">Задачата ще бъде отбелязана на картата там, където се намирате в момента.</p>
-                        </div>
-                     )}
                   </div>
-                )}
-
-                {!isEditing && (
-                    <div className="mt-auto pt-2 relative z-10">
-                        <button 
-                           onClick={handleInitialPublish}
-                           disabled={locationMode === 'MANUAL' && !manualCoords}
-                           className="w-full py-4 bg-white text-blue-700 rounded-2xl text-lg font-black hover:bg-blue-50 shadow-xl transition-all flex items-center justify-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed transform active:scale-[0.98]"
-                        >
-                           Публикувай Задачата
-                        </button>
-                        <button 
-                           onClick={() => { setStep('INPUT_TEXT'); setIsEditing(false); }}
-                           className="mt-4 w-full py-2 text-blue-200 font-bold text-xs hover:text-white uppercase tracking-wide transition-colors"
-                        >
-                           Започни отначало
-                        </button>
+                ) : (
+                  <>
+                    <div className="flex justify-between items-start mb-3">
+                      <div className="flex-1">
+                        <div className="flex items-center gap-1.5 mb-1.5">
+                          <span className="px-1.5 py-0.5 rounded bg-blue-500/20 text-blue-300 text-[8px] font-black uppercase tracking-widest border border-blue-500/20">AI Assistant</span>
+                          <span className="text-[9px] font-bold text-slate-400 uppercase tracking-widest">{aiResult.category}</span>
+                        </div>
+                        <h3 className="text-lg font-black text-white leading-tight drop-shadow-sm">{aiResult.title}</h3>
+                      </div>
                     </div>
-                )}
-             </div>
-          )}
 
+                    {/* Description */}
+                    <p className="text-xs text-slate-300 font-medium leading-relaxed bg-white/5 p-4 rounded-2xl border border-white/5">"{aiResult.description}"</p>
+
+                    {/* Edit Button at Bottom */}
+                    <div className="flex justify-end mt-2 mb-3">
+                      <button onClick={() => { setTempTitle(aiResult.title); setTempDescription(aiResult.description); setIsEditing(true); }} className="text-[10px] font-bold text-blue-400 flex items-center gap-1 hover:text-white transition-colors py-1 px-2 rounded-lg hover:bg-white/10">
+                        <Edit2 size={12} /> Редактирай
+                      </button>
+                    </div>
+
+                    {/* Images & Add Button */}
+                    <div className="flex gap-2.5 overflow-x-auto scrollbar-hide items-center">
+                      {photos.map((p, i) => (
+                        <div key={i} className="relative w-12 h-12 rounded-xl overflow-hidden border border-white/10 shrink-0">
+                          <img src={p} className="w-full h-full object-cover" alt="" />
+                        </div>
+                      ))}
+                      {/* Add Photo Button */}
+                      {photos.length < 5 && (
+                        <button onClick={() => fileInputRef.current?.click()} className="relative w-12 h-12 rounded-xl border border-white/20 flex items-center justify-center text-white/50 hover:text-white hover:bg-white/10 transition-colors shrink-0 backdrop-blur-sm bg-white/5">
+                          <Plus size={20} strokeWidth={2.5} />
+                        </button>
+                      )}
+                    </div>
+                  </>
+                )}
+              </div>
+
+              {!isEditing && (
+                <div className="space-y-4">
+                  <div className="flex justify-between items-center px-1">
+                    <h2 className="text-2xl font-black tracking-tighter text-white">Преглед</h2>
+                    <span className="text-lg font-black text-blue-500 bg-blue-500/10 px-3 py-1 rounded-lg border border-blue-500/20">3/3</span>
+                  </div>
+
+                  <div className="grid grid-cols-2 gap-2">
+                    <div className="col-span-2 bg-white/5 rounded-2xl p-1 border border-white/10 flex gap-1 shadow-inner">
+                      <button
+                        onClick={() => userLocation && setLocationMode('GPS')}
+                        disabled={!userLocation}
+                        className={`flex-1 py-3 rounded-xl text-[9px] font-black uppercase flex items-center justify-center gap-1.5 transition-all ${locationMode === 'GPS' ? 'bg-white text-slate-900 shadow-md' : 'text-slate-400 hover:text-white'} ${!userLocation ? 'opacity-30 cursor-not-allowed' : ''}`}
+                      >
+                        <Navigation size={12} /> GPS
+                      </button>
+                      <button onClick={() => setLocationMode('MANUAL')} className={`flex-1 py-3 rounded-xl text-[9px] font-black uppercase flex items-center justify-center gap-1.5 transition-all ${locationMode === 'MANUAL' ? 'bg-white text-slate-900 shadow-md' : 'text-slate-400 hover:text-white'}`}><Search size={12} /> Ръчно</button>
+                    </div>
+                    {/* Location Info Text */}
+                    <p className="col-span-2 text-[10px] text-slate-400 font-medium text-center -mt-1 px-4">
+                      {!userLocation && locationMode === 'MANUAL'
+                        ? <span className="text-amber-400 flex items-center justify-center gap-1"><Info size={10} /> GPS достъпът е отказан. Моля, изберете локация ръчно.</span>
+                        : (locationMode === 'GPS' ? 'Използва текущата ви локация.' : 'Посочете точен адрес на картата.')
+                      }
+                    </p>
+
+                    {locationMode === 'MANUAL' && (
+                      <button onClick={() => setIsLocationPickerOpen(true)} className="col-span-2 p-4 rounded-2xl bg-blue-500/10 border border-blue-500/20 flex items-center gap-3 animate-in slide-in-from-top-2">
+                        <MapPin size={18} className="text-blue-400 shrink-0" />
+                        <p className="text-[11px] font-bold text-white truncate">{manualAddress || 'Избери локация от картата...'}</p>
+                      </button>
+                    )}
+
+                    <div className="col-span-2 bg-white/5 rounded-2xl p-1 border border-white/10 flex gap-1 shadow-inner">
+                      {['ASAP', 'SPECIFIC', 'FLEXIBLE'].map(t => (
+                        <button key={t} onClick={() => setTimingType(t as any)} className={`flex-1 py-3 rounded-xl text-[9px] font-black uppercase transition-all ${timingType === t ? 'bg-white text-slate-900 shadow-md' : 'text-slate-400 hover:text-white'}`}>
+                          {t === 'ASAP' ? 'Спешно' : t === 'SPECIFIC' ? 'Дата' : 'Гъвкаво'}
+                        </button>
+                      ))}
+                    </div>
+                    {/* Timing Info Text */}
+                    <p className="col-span-2 text-[10px] text-slate-400 font-medium text-center -mt-1 px-4">
+                      {timingType === 'ASAP' && 'Изпълнителите ще реагират мигновено.'}
+                      {timingType === 'SPECIFIC' && 'За конкретна дата и час.'}
+                      {timingType === 'FLEXIBLE' && 'Когато е удобно (често по-ниска цена).'}
+                    </p>
+
+                    {timingType === 'SPECIFIC' && (
+                      <div className="col-span-2 p-3.5 rounded-2xl bg-purple-500/10 border border-purple-500/20 flex items-center gap-3">
+                        <Calendar size={16} className="text-purple-400 shrink-0" />
+                        <input type="datetime-local" value={specificDate} onChange={e => setSpecificDate(e.target.value)} className="w-full bg-transparent text-white font-bold text-[11px] outline-none" style={{ colorScheme: 'dark' }} />
+                      </div>
+                    )}
+                  </div>
+
+                  <button
+                    onClick={handleInitialPublish}
+                    disabled={(locationMode === 'MANUAL' && !manualCoords) || (locationMode === 'GPS' && !userLocation)}
+                    className="w-full py-5 bg-white text-slate-900 rounded-[24px] text-base font-black shadow-xl flex items-center justify-center gap-3 active:scale-[0.98] transition-all group overflow-hidden relative border-t border-white/20"
+                  >
+                    <span className="relative z-10">{t('ai_btn_publish_initial')}</span>
+                    <Sparkles size={18} className="text-blue-500 z-10" fill="currentColor" />
+                  </button>
+                </div>
+              )}
+            </div>
+          )}
         </div>
       </div>
 
-      {/* PRICE ESTIMATION MODAL */}
+      <LocationPickerModal isOpen={isLocationPickerOpen} onClose={() => setIsLocationPickerOpen(false)} onConfirm={(a, lat, lng) => { setManualAddress(a); setManualCoords({ lat, lng }); }} initialLat={manualCoords?.lat} initialLng={manualCoords?.lng} initialAddress={manualAddress} />
+
+      {/* AI PRICE ADVISOR MODAL - FIX: FULL SCREEN ON MOBILE TO PREVENT JITTER (p-0) */}
       {showPriceModal && (
-          <div className="absolute z-[70] inset-0 flex items-center justify-center p-6">
-               <div className="w-full max-w-sm bg-white rounded-[32px] shadow-2xl overflow-hidden animate-in zoom-in-95 duration-300 relative">
-                  
-                  {isCalculatingPrice && (
-                      <div className="p-10 flex flex-col items-center justify-center text-center">
-                           <div className="w-16 h-16 rounded-full border-4 border-blue-100 border-t-blue-600 animate-spin mb-6"></div>
-                           <h3 className="text-xl font-black text-slate-800 mb-2">AI Оценява Задачата...</h3>
-                           <p className="text-sm text-slate-500">Анализирам пазарните цени за подобни услуги в България.</p>
+        <div className="fixed inset-0 z-[9999] flex items-center justify-center p-0 md:p-4">
+
+          {/* Backdrop - Visible mainly on desktop */}
+          <div className="absolute inset-0 bg-slate-950/80 backdrop-blur-sm transition-opacity" onClick={() => setShowPriceModal(false)}></div>
+
+          {/* Modal Card - Full Screen Mobile (w-full h-full), Centered Desktop */}
+          <div className="relative w-full h-full md:w-auto md:h-auto md:max-w-[360px] md:max-h-[85vh] bg-[#0f172a] md:rounded-[40px] shadow-2xl flex flex-col overflow-hidden animate-in fade-in duration-200 md:ring-1 md:ring-white/10">
+
+            {/* Gradient Border Inner - Desktop only feel */}
+            <div className="absolute inset-0 rounded-[inherit] bg-gradient-to-b from-blue-400 to-indigo-600 opacity-20 pointer-events-none hidden md:block"></div>
+
+            {/* Inner Scroll Container - Centers content on mobile full screen */}
+            <div className="flex-1 overflow-y-auto scrollbar-hide p-6 flex flex-col justify-center items-center relative z-10">
+
+              {/* Mirror Reflection Effect */}
+              <div className="absolute top-0 left-0 w-full h-64 bg-gradient-to-b from-white/5 to-transparent pointer-events-none rounded-t-[40px]"></div>
+
+              {isCalculatingPrice ? (
+                <div className="py-12 flex flex-col items-center w-full">
+                  <div className="relative mb-8">
+                    <div className="w-20 h-20 border-[3px] border-white/10 border-t-blue-500 rounded-full animate-spin"></div>
+                    <Bot className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 text-white animate-pulse" size={32} />
+                  </div>
+                  <h3 className="text-2xl font-black text-white tracking-tighter">{t('price_calculating')}</h3>
+                </div>
+              ) : (
+                <div className="w-full text-center">
+                  {/* ICON */}
+                  <div className="flex flex-col items-center mb-6">
+                    <div className="w-16 h-16 bg-white/10 rounded-[28px] flex items-center justify-center text-white shadow-2xl mb-4 border border-white/10">
+                      <Sparkles size={32} className="text-blue-300" fill="currentColor" />
+                    </div>
+                    <h4 className="text-[10px] font-black tracking-[0.4em] text-blue-400 uppercase">AI Price Advisor</h4>
+                  </div>
+
+                  {/* PRICE DISPLAY BOX */}
+                  <div className="mb-8 py-8 bg-black/40 rounded-[40px] border border-white/10 relative overflow-hidden group">
+                    <div className="absolute top-0 left-1/2 -translate-x-1/2 px-4 py-2 bg-slate-900/90 rounded-b-2xl border-b border-x border-white/10 shadow-lg">
+                      <span className="text-[8px] font-black text-white uppercase tracking-[0.25em] whitespace-nowrap">Ориентировъчна цена</span>
+                    </div>
+
+                    <div className="mt-4 flex flex-col items-center">
+                      <div className="text-5xl font-black text-white tracking-tighter flex items-baseline gap-1 drop-shadow-2xl">
+                        {estimatedPrice.replace(/€|EUR|лв\.?|BGN/gi, '').trim()}
+                        <span className="text-2xl text-blue-400 font-bold">€</span>
                       </div>
-                  )}
+                    </div>
+                  </div>
 
-                  {!isCalculatingPrice && (
-                      <>
-                         <div className="h-32 bg-gradient-to-br from-indigo-600 to-blue-500 relative overflow-hidden flex items-center justify-center">
-                              <div className="absolute inset-0 bg-[url('https://www.transparenttextures.com/patterns/cubes.png')] opacity-10"></div>
-                              <div className="absolute -bottom-8 left-1/2 -translate-x-1/2 w-24 h-24 bg-white rounded-full shadow-xl flex items-center justify-center border-4 border-blue-50">
-                                  <Sparkles size={40} className="text-yellow-400 fill-yellow-400 animate-pulse" />
-                              </div>
-                         </div>
-                         
-                         <div className="pt-14 pb-8 px-6 text-center">
-                              <h3 className="text-xs font-black text-blue-500 uppercase tracking-widest mb-1">AI ПАЗАРНА ОЦЕНКА</h3>
-                              <p className="text-3xl font-black text-slate-900 mb-4">{estimatedPrice}</p>
-                              
-                              <div className="bg-blue-50 rounded-2xl p-4 mb-6 border border-blue-100 relative overflow-hidden">
-                                  <div className="absolute top-0 left-0 w-1 h-full bg-blue-500"></div>
-                                  <div className="flex gap-3 items-start text-left">
-                                      <div className="mt-0.5 bg-white p-1.5 rounded-full text-blue-600 shadow-sm shrink-0">
-                                          <TrendingDown size={18} />
-                                      </div>
-                                      <div>
-                                          <p className="text-sm font-bold text-slate-800 mb-1">Искаш по-добра цена?</p>
-                                          <p className="text-xs text-slate-600 leading-relaxed">
-                                              Това е стандартната пазарна стойност. В <span className="font-black text-slate-800">Needo</span> обаче изпълнителите се конкурират и често предлагат <span className="text-green-600 font-black">по-изгодни оферти!</span>
-                                          </p>
-                                      </div>
-                                  </div>
-                              </div>
+                  {/* COMPETITION EXPLANATION BLOCK */}
+                  <div className="bg-white/5 p-6 rounded-[32px] text-left border border-white/10 mb-10 relative">
+                    <div className="flex gap-3 items-start mb-2.5">
+                      <div className="w-8 h-8 rounded-full bg-blue-500 text-white flex items-center justify-center shrink-0 shadow-lg"><TrendingDown size={18} /></div>
+                      <h5 className="text-[11px] font-black text-white uppercase tracking-wider leading-tight pt-1.5">Спести с конкуренция</h5>
+                    </div>
+                    <p className="text-[10px] text-slate-300 leading-relaxed font-medium">
+                      Тази сума е само начален пазарен ориентир. В <b>Needo</b> изпълнителите <b>наддават за Вашата задача</b>, което често води до оферти <b>в пъти по-ниски</b> от първоначалната оценка.
+                    </p>
+                  </div>
 
-                              <button 
-                                onClick={handleFinalConfirm}
-                                className="w-full py-4 bg-slate-900 text-white rounded-2xl font-black text-lg shadow-xl shadow-slate-200 hover:bg-blue-600 transition-colors transform active:scale-[0.98]"
-                              >
-                                  Разбрах, Публикувай!
-                              </button>
-                         </div>
-                      </>
-                  )}
-               </div>
+                  {/* FINAL ACTIONS */}
+                  <div className="space-y-6">
+                    <button
+                      onClick={handleFinalConfirm}
+                      disabled={isPublishing}
+                      className="w-full py-5 bg-white text-slate-900 rounded-[28px] font-black text-lg shadow-[0_20px_40px_-10px_rgba(255,255,255,0.3)] active:scale-[0.98] transition-all flex items-center justify-center gap-3 disabled:opacity-50"
+                    >
+                      {isPublishing ? <Loader2 className="animate-spin" size={24} /> : <><Check size={24} strokeWidth={4} /> {t('price_btn_publish')}</>}
+                    </button>
+                    <button onClick={() => setShowPriceModal(false)} className="text-[10px] font-black text-slate-500 hover:text-white transition-colors uppercase tracking-[0.4em] py-2 block mx-auto">{t('cancel')}</button>
+                  </div>
+                </div>
+              )}
+            </div>
           </div>
+        </div>
       )}
     </div>
   );
 };
-
-const CheckCircleIcon = () => (
-   <div className="w-6 h-6 bg-white text-green-600 rounded-full flex items-center justify-center shadow-md">
-      <Check size={14} strokeWidth={4} />
-   </div>
-);

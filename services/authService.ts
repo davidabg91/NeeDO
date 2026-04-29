@@ -30,7 +30,8 @@ export const syncUserProfile = async (fbUser: FirebaseUser): Promise<User> => {
   } catch (error: any) {
     // If permission denied (DB locked), allow app to function with basic auth data
     if (error.code !== 'permission-denied') {
-        console.warn("AuthService: Firestore connection failed, using auth profile fallback.", error);
+        const errorMsg = error instanceof Error ? error.message : String(error);
+        console.warn("AuthService: Firestore connection failed, using auth profile fallback.", errorMsg);
     }
   }
   
@@ -57,7 +58,8 @@ export const loginUser = async (email: string, password?: string): Promise<User 
     // Use the robust sync function
     return await syncUserProfile(userCredential.user);
   } catch (error: any) {
-    console.error("Login error", error);
+    // Fix: Log stringified message to avoid circular structure error
+    console.error("Login error:", error instanceof Error ? error.message : String(error));
     if (error.code === 'auth/invalid-credential' || error.code === 'auth/user-not-found' || error.code === 'auth/wrong-password') {
         throw new Error('Грешен имейл или парола.');
     }
@@ -107,7 +109,8 @@ export const loginWithGoogle = async (): Promise<User> => {
             await setDoc(doc(db, "users", fbUser.uid), newUser, { merge: true });
         } catch (e: any) {
             if (e.code !== 'permission-denied') {
-                console.warn("Could not create Google user in Firestore", e);
+                const errorMsg = e instanceof Error ? e.message : String(e);
+                console.warn("Could not create Google user in Firestore", errorMsg);
             }
         }
         return newUser;
@@ -115,7 +118,8 @@ export const loginWithGoogle = async (): Promise<User> => {
 
     return userProfile;
   } catch (error: any) {
-    console.error("Google Login Error", error);
+    // Fix: Log stringified message to avoid circular structure error
+    console.error("Google Login Error:", error instanceof Error ? error.message : String(error));
     if (error.code === 'auth/popup-closed-by-user') {
         throw new Error("Входът беше отказан.");
     }
@@ -128,7 +132,15 @@ export const registerUser = async (name: string, email: string, phoneNumber: str
     throw new Error("Registration requires a password.");
 };
 
-export const registerUserWithPassword = async (name: string, email: string, phoneNumber: string, password: string): Promise<User> => {
+export const registerUserWithPassword = async (
+  name: string, 
+  email: string, 
+  phoneNumber: string, 
+  password: string,
+  isCompany?: boolean,
+  companyCategory?: string,
+  companyFoundedDate?: string
+): Promise<User> => {
   try {
     const userCredential = await createUserWithEmailAndPassword(auth, email, password);
     const fbUser = userCredential.user;
@@ -146,7 +158,11 @@ export const registerUserWithPassword = async (name: string, email: string, phon
       // Use Site Logo as default
       avatarUrl: DEFAULT_AVATAR,
       isAdmin: email === 'davida1991@gmail.com',
-      status: 'ACTIVE'
+      status: 'ACTIVE',
+      isCompany: isCompany || false,
+      companyCategory: companyCategory || undefined,
+      companyFoundedDate: companyFoundedDate || undefined,
+      businessCategories: isCompany && companyCategory ? [companyCategory] : []
     };
 
     // Try to save to Firestore, but don't fail registration if it fails (just log)
@@ -154,7 +170,8 @@ export const registerUserWithPassword = async (name: string, email: string, phon
         await setDoc(doc(db, "users", fbUser.uid), newUser);
     } catch (e: any) {
         if (e.code !== 'permission-denied') {
-            console.warn("Could not create user profile in Firestore (Offline/Permission issue)", e);
+            const errorMsg = e instanceof Error ? e.message : String(e);
+            console.warn("Could not create user profile in Firestore (Offline/Permission issue)", errorMsg);
         }
     }
 
@@ -201,7 +218,8 @@ export const getAllUsers = async (): Promise<User[]> => {
     });
     return users;
   } catch (error) {
-    console.warn("getAllUsers failed", error);
+    const errorMsg = error instanceof Error ? error.message : String(error);
+    console.warn("getAllUsers failed", errorMsg);
     return [];
   }
 };
@@ -211,7 +229,8 @@ export const updateUserStatus = async (userId: string, status: 'ACTIVE' | 'BANNE
         const userRef = doc(db, "users", userId);
         await updateDoc(userRef, { status });
     } catch (error) {
-        console.warn("updateUserStatus failed", error);
+        const errorMsg = error instanceof Error ? error.message : String(error);
+        console.warn("updateUserStatus failed", errorMsg);
     }
 };
 
@@ -220,7 +239,8 @@ export const updateUserProfile = async (userId: string, data: Partial<User>) => 
         const userRef = doc(db, "users", userId);
         await updateDoc(userRef, data);
     } catch (error) {
-        console.warn("updateUserProfile failed", error);
+        const errorMsg = error instanceof Error ? error.message : String(error);
+        console.warn("updateUserProfile failed", errorMsg);
         throw new Error("Неуспешно обновяване на профила.");
     }
 };
@@ -235,7 +255,8 @@ export const getProvidersByCategory = async (category: string): Promise<User[]> 
         });
         return users;
     } catch (error) {
-        console.warn("getProvidersByCategory failed", error);
+        const errorMsg = error instanceof Error ? error.message : String(error);
+        console.warn("getProvidersByCategory failed", errorMsg);
         return [];
     }
 };

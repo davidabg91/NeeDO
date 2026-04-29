@@ -1,180 +1,235 @@
 
 import React from 'react';
 import { Task, TaskStatus } from '../types';
-import { MapPin, ArrowRight, Zap } from 'lucide-react';
+import { MapPin, ArrowRight, TrendingDown, Calendar, Star, Clock, Sparkles, CheckCircle2, Navigation, Zap } from 'lucide-react';
 import { StarRating } from './StarRating';
+import { CATEGORIES_LIST } from '../constants';
+import { useLanguage } from '../contexts/LanguageContext';
 
 interface TaskCardProps {
-  task: Task;
-  distanceKm: number | null;
-  onClick: () => void;
-  onOfferClick: (e: React.MouseEvent) => void;
+    task: Task;
+    distanceKm: number | null;
+    onClick: () => void;
+    onOfferClick: (e: React.MouseEvent) => void;
 }
 
 // Needo Logo Placeholder
 const DEFAULT_AVATAR = "https://ui-avatars.com/api/?name=N&background=2563eb&color=fff&size=128&bold=true&length=1";
 
 export const TaskCard: React.FC<TaskCardProps> = ({ task, distanceKm, onClick, onOfferClick }) => {
-  
-  const offersCount = task.offers.length;
+    const { t } = useLanguage();
 
-  // Find last offer (most recent)
-  const lastOffer = task.offers.length > 0 
-    ? task.offers.reduce((latest, current) => current.createdAt > latest.createdAt ? current : latest) 
-    : null;
+    // NOTE: For scalability, we don't fetch all offers in the list view.
+    // We use denormalized counters and potentially a 'lowestPrice' field (if implemented).
+    const offersCount = task.offersCount || 0;
+    const bestOffer = null; // We would need a dedicated field in the main doc for this now
 
-  const isHot = offersCount > 2;
-  const fallbackImage = 'https://images.unsplash.com/photo-1581578731117-104f2a8d2305?w=800&auto=format&fit=crop&q=60';
-  
-  // Robust rating display logic
-  const hasValidRating = task.requesterRating && task.requesterRating > 0;
-  
-  // If reviewCount is present and 0, they are new.
-  // If reviewCount is UNDEFINED (legacy data) and rating is 5.0 (legacy default), they are considered new.
-  // If rating is 0, they are new.
-  const isNewUser = (task.requesterReviewCount === 0) || 
-                    (!hasValidRating) || 
-                    (task.requesterReviewCount === undefined && task.requesterRating === 5);
+    const fallbackImage = 'https://images.unsplash.com/photo-1581578731117-104f2a8d2305?w=800&auto=format&fit=crop&q=60';
 
-  const getAvatar = (url?: string) => {
-      if (!url || url.includes('dicebear')) return DEFAULT_AVATAR;
-      return url;
-  };
+    const hasValidRating = task.requesterRating && task.requesterRating > 0;
+    const isNewUser = (task.requesterReviewCount === 0) || (!hasValidRating);
 
-  return (
-    <div 
-      onClick={onClick}
-      className="group relative w-full p-[3px] rounded-[26px] bg-gradient-to-br from-sky-300 via-blue-600 to-indigo-900 shadow-lg transition-transform duration-300 md:hover:-translate-y-1 active:scale-[0.98] hover:shadow-xl cursor-pointer transform-gpu touch-manipulation"
-      style={{ 
-        isolation: 'isolate', 
-        WebkitBackfaceVisibility: 'hidden', 
-        backfaceVisibility: 'hidden',
-        transform: 'translate3d(0,0,0)' 
-      }}
-    >
-      {/* Inner Content Card */}
-      <div className="w-full h-full bg-white rounded-[23px] overflow-hidden flex flex-col relative">
-      
-        {/* Background Decorative Elements */}
-        <div className="absolute inset-0 bg-slate-50 opacity-50 pointer-events-none"></div>
-        
-        {/* Image Section */}
-        <div 
-          className="relative h-48 md:h-56 w-full overflow-hidden"
-          style={{ 
-            WebkitMaskImage: '-webkit-radial-gradient(white, black)', 
-            transform: 'translate3d(0,0,0)'
-          }} 
+    const getAvatar = (url?: string) => {
+        if (!url || url.includes('dicebear')) return DEFAULT_AVATAR;
+        return url;
+    };
+
+    const categoryItem = CATEGORIES_LIST.find(c => c.id === task.category);
+    const categoryIcon = categoryItem?.icon || '📌';
+
+    const getStatusLabel = (status: TaskStatus) => {
+        return t(`status_${status}` as any) || status;
+    };
+
+    // Format Address: Take only first 2 parts (City, Quarter)
+    const addressParts = task.address ? task.address.split(',') : [];
+    const displayAddress = addressParts.length >= 2
+        ? `${addressParts[0].trim()}, ${addressParts[1].trim()}`
+        : (addressParts[0] || t('label_location'));
+
+    return (
+        <div
+            onClick={onClick}
+            className="group relative w-full h-full cursor-pointer transition-all duration-300 hover:-translate-y-1"
         >
-          <img 
-            src={task.imageUrl || fallbackImage} 
-            alt={task.title}
-            className="w-full h-full object-cover transition-transform duration-700 group-hover:scale-110 will-change-transform"
-            onError={(e) => {
-              const target = e.target as HTMLImageElement;
-              if (target.src !== fallbackImage) {
-                  target.src = fallbackImage;
-              }
-            }}
-          />
-          
-          {/* Gradient Overlay */}
-          <div className="absolute inset-0 bg-gradient-to-t from-slate-900/80 via-transparent to-transparent" />
+            {/* Main Card Container */}
+            <div className="relative w-full h-full bg-white rounded-[28px] overflow-hidden shadow-[0_4px_20px_rgb(0,0,0,0.03)] border border-slate-100 hover:shadow-[0_12px_30px_rgb(0,0,0,0.08)] hover:border-blue-200 transition-all duration-300 flex flex-col">
 
-          {/* Top Badges */}
-          {isHot && (
-            <div className="absolute top-3 left-3 z-10">
-               <div className="w-8 h-8 bg-white/20 backdrop-blur-md border border-white/30 rounded-full flex items-center justify-center shadow-lg">
-                  <Zap className="text-yellow-400 fill-yellow-400" size={16} />
-               </div>
-            </div>
-          )}
+                {/* --- TOP IMAGE SECTION --- */}
+                <div className="relative h-56 w-full shrink-0 overflow-hidden">
 
-          <div className="absolute top-3 right-3 z-10">
-            <span className={`px-3 py-1 rounded-full text-[10px] font-black uppercase tracking-wider backdrop-blur-md border border-white/20 shadow-lg
-              ${task.status === TaskStatus.OPEN ? 'bg-blue-600/90 text-white' : ''}
-              ${task.status === TaskStatus.IN_PROGRESS ? 'bg-purple-600/90 text-white' : ''}
-              ${task.status === TaskStatus.CLOSED ? 'bg-green-600/90 text-white' : ''}
-            `}>
-              {task.status === TaskStatus.OPEN ? 'ACTIVE' : task.status}
-            </span>
-          </div>
+                    {/* Image with Zoom Effect */}
+                    <img
+                        src={task.imageUrl || fallbackImage}
+                        alt={task.title}
+                        className="w-full h-full object-cover transition-transform duration-700 ease-out group-hover:scale-105"
+                        onError={(e) => {
+                            const target = e.target as HTMLImageElement;
+                            if (target.src !== fallbackImage) target.src = fallbackImage;
+                        }}
+                    />
 
-          {/* Title on Image */}
-          <div className="absolute bottom-0 left-0 w-full p-4 translate-y-1 md:group-hover:translate-y-0 transition-transform duration-300">
-             <div className="flex flex-wrap gap-2 mb-1.5 opacity-90">
-                <div className="flex items-center gap-1 bg-black/40 backdrop-blur-md px-2 py-0.5 rounded-md text-white text-[9px] font-bold border border-white/10">
-                   <MapPin size={9} className="text-blue-400" />
-                   <span className="truncate max-w-[100px]">{task.address || 'Локация'}</span>
-                   {distanceKm !== null && (
-                      <span className="shrink-0 border-l border-white/30 pl-1 ml-1">• {distanceKm} км</span>
-                   )}
-                </div>
-             </div>
-             <h3 className="text-base md:text-lg font-black text-white leading-tight drop-shadow-md line-clamp-2">
-              {task.title}
-             </h3>
-          </div>
-        </div>
+                    {/* Gradient Overlay */}
+                    <div className="absolute inset-0 bg-gradient-to-t from-black/60 to-transparent opacity-60" />
 
-        {/* Content Body - Compact Stack */}
-        <div className="flex flex-col p-4 gap-3 bg-white relative z-10 flex-1">
-          
-          {/* Description */}
-          <p className="text-slate-500 text-xs font-medium leading-relaxed line-clamp-2">
-            {task.description}
-          </p>
-
-          {/* Info Grid (Category + Offers) */}
-          <div className="grid grid-cols-2 gap-2 mt-auto">
-             <div className="bg-slate-50 rounded-xl p-2 border border-slate-100 flex flex-col items-start">
-                <span className="text-[9px] font-black text-slate-400 uppercase">КАТЕГОРИЯ</span>
-                <span className="font-bold text-slate-700 text-xs line-clamp-1">{task.category || 'Общи'}</span>
-             </div>
-             <div className="bg-slate-50 rounded-xl p-2 border border-slate-100 flex flex-col items-start">
-                <span className="text-[9px] font-black text-slate-400 uppercase">ОФЕРТИ</span>
-                <span className="font-bold text-slate-900 text-xs">{offersCount} оферти</span>
-             </div>
-          </div>
-
-          {/* Requester & Last Offer Row */}
-          <div className="flex items-center justify-between pt-1">
-               <div className="flex items-center gap-2">
-                   <div className="h-8 w-8 rounded-full ring-1 ring-slate-100 bg-slate-50 overflow-hidden">
-                      <img 
-                        src={getAvatar(task.requesterAvatar)} 
-                        alt="" 
-                        className="w-full h-full object-cover" 
-                      />
-                   </div>
-                   <div>
-                       <p className="text-[9px] font-bold text-slate-400 uppercase leading-none mb-0.5">{task.requesterName}</p>
-                       {!isNewUser ? (
-                            <div className="flex items-center gap-1">
-                                <StarRating rating={task.requesterRating || 0} size={10} />
-                                <span className="text-[10px] font-bold text-slate-700">{task.requesterRating?.toFixed(1)}</span>
+                    {/* Top Badges */}
+                    <div className="absolute top-3 left-3 right-3 flex justify-between items-start z-10">
+                        <div className="flex gap-2">
+                            {/* Status Pill */}
+                            <div className={`px-2.5 py-1.5 rounded-xl backdrop-blur-md border border-white/20 shadow-sm flex items-center gap-1.5 
+                        ${task.status === TaskStatus.OPEN ? 'bg-blue-500/80 text-white' : ''}
+                        ${task.status === TaskStatus.IN_PROGRESS ? 'bg-purple-500/80 text-white' : ''}
+                        ${task.status === TaskStatus.CLOSED ? 'bg-emerald-500/80 text-white' : ''}
+                        ${task.status === TaskStatus.AWAITING_PAYMENT ? 'bg-amber-500/80 text-white' : ''}
+                        ${task.status === TaskStatus.DISPUTED ? 'bg-red-500/80 text-white' : ''}
+                     `}>
+                                <span className="text-[10px] font-black uppercase tracking-wider">
+                                    {getStatusLabel(task.status)}
+                                </span>
                             </div>
-                       ) : (
-                            <span className="text-[9px] font-bold text-blue-600 bg-blue-50 border border-blue-100 px-1.5 py-0.5 rounded">НОВ</span>
-                       )}
-                   </div>
-               </div>
 
-               <div className="text-right flex flex-col items-end">
-                    <p className="text-[9px] font-bold text-slate-400 uppercase leading-none mb-1">ПОСЛЕДНА ОФЕРТА:</p>
-                    <span className={`font-black ${lastOffer ? 'text-xs bg-emerald-100 text-emerald-700 px-2 py-1 rounded-lg border border-emerald-200' : 'text-sm text-slate-300'}`}>
-                        {lastOffer ? `${lastOffer.price} лв.` : '---'}
-                    </span>
-               </div>
-          </div>
+                            {/* Distance Badge */}
+                            {distanceKm !== null && (
+                                <div className="px-2.5 py-1.5 rounded-xl bg-black/60 backdrop-blur-md border border-white/20 shadow-sm flex items-center gap-1 text-white">
+                                    <Navigation size={10} className="text-yellow-400 fill-yellow-400" />
+                                    <span className="text-[10px] font-black">{distanceKm} км</span>
+                                </div>
+                            )}
+                        </div>
 
-          {/* Button */}
-          <button className="w-full py-2.5 bg-slate-900 text-white rounded-xl font-bold text-xs flex items-center justify-center gap-2 hover:bg-blue-600 transition-colors shadow-md">
-             Виж Детайли <ArrowRight size={14} />
-          </button>
+                        {/* Category */}
+                        <div className="w-8 h-8 rounded-full bg-white/20 backdrop-blur-md border border-white/20 flex items-center justify-center text-sm shadow-sm">
+                            {categoryIcon}
+                        </div>
+                    </div>
+                </div>
 
+                {/* --- CONTENT SECTION --- */}
+                <div className="flex-1 flex flex-col p-4 gap-4">
+
+                    {/* Title & Description */}
+                    <div>
+                        <h3 className="text-[16px] font-black text-slate-900 leading-tight mb-2 line-clamp-2 group-hover:text-blue-600 transition-colors">
+                            {task.title}
+                        </h3>
+                        <p className="text-xs text-slate-500 font-medium leading-relaxed line-clamp-2">
+                            {task.description}
+                        </p>
+                    </div>
+
+                    {/* INFO PANEL (Location & Date) */}
+                    <div className="bg-slate-50 rounded-xl p-3 flex items-center justify-between border border-slate-100">
+                        <div className="flex items-center gap-2 max-w-[60%]">
+                            <div className="w-8 h-8 rounded-full bg-white flex items-center justify-center text-blue-500 shadow-sm shrink-0">
+                                <MapPin size={14} />
+                            </div>
+                            <div className="flex flex-col min-w-0">
+                                <span className="text-[9px] font-bold text-slate-400 uppercase">Локация</span>
+                                <span className="text-[10px] font-bold text-slate-700 truncate block w-full">
+                                    {displayAddress}
+                                </span>
+                            </div>
+                        </div>
+
+                        <div className="w-px h-8 bg-slate-200 mx-1"></div>
+
+                        <div className="flex items-center gap-2 max-w-[40%] justify-end">
+                            <div className="flex flex-col items-end min-w-0">
+                                <span className="text-[9px] font-bold text-slate-400 uppercase">ПУБЛИКУВАНО</span>
+                                <span className="text-[10px] font-bold text-slate-700 truncate">
+                                    {new Date(task.createdAt).toLocaleDateString(undefined, { month: 'short', day: 'numeric' })}
+                                </span>
+                            </div>
+                            <div className="w-8 h-8 rounded-full bg-white flex items-center justify-center text-slate-500 shadow-sm shrink-0">
+                                <Calendar size={14} />
+                            </div>
+                        </div>
+                    </div>
+
+                    {/* PRICE / OFFER PANEL */}
+                    <div className="mt-auto">
+                        {bestOffer ? (
+                            <div className="bg-emerald-50 border border-emerald-100 rounded-2xl p-3 flex justify-between items-center relative overflow-hidden group/offer">
+                                <div className="absolute top-0 right-0 w-16 h-16 bg-emerald-400/10 rounded-full blur-xl -mr-6 -mt-6"></div>
+
+                                <div className="flex items-center gap-2.5 relative z-10">
+                                    <div className="w-8 h-8 rounded-full bg-emerald-100 text-emerald-600 flex items-center justify-center shadow-sm">
+                                        <TrendingDown size={16} strokeWidth={2.5} />
+                                    </div>
+                                    <div className="flex flex-col">
+                                        <span className="text-[9px] font-black text-emerald-600 uppercase tracking-widest">АКТИВНИ ОФЕРТИ</span>
+                                        <span className="text-[10px] font-medium text-emerald-800/70">{offersCount} кандидати</span>
+                                    </div>
+                                </div>
+
+                                <div className="text-right relative z-10">
+                                    <div className="flex items-baseline justify-end gap-0.5">
+                                        <span className="text-xl font-black text-emerald-900 tracking-tighter">{bestOffer.price}</span>
+                                        <span className="text-xs font-bold text-emerald-600">€</span>
+                                    </div>
+                                </div>
+                            </div>
+                        ) : (
+                            <div className="bg-slate-50 border border-slate-200 border-dashed rounded-2xl p-3 flex justify-between items-center">
+                                <div className="flex items-center gap-2.5">
+                                    <div className="w-8 h-8 rounded-full bg-slate-200 text-slate-500 flex items-center justify-center">
+                                        <Clock size={16} />
+                                    </div>
+                                    <div className="flex flex-col">
+                                        <span className="text-[9px] font-black text-slate-500 uppercase tracking-widest">ОЧАКВА ОФЕРТИ</span>
+                                        <span className="text-[10px] font-medium text-slate-400">Бъди първият</span>
+                                    </div>
+                                </div>
+                                <span className="text-xs font-bold text-slate-400">-- €</span>
+                            </div>
+                        )}
+                    </div>
+
+                    {/* Footer: User Info */}
+                    <div className="pt-3 border-t border-slate-100 flex items-center justify-between">
+                        <div className="flex items-center gap-2">
+                            <img
+                                src={getAvatar(task.requesterAvatar)}
+                                className="w-7 h-7 rounded-full object-cover ring-2 ring-slate-50"
+                                alt=""
+                            />
+                            <div className="flex flex-col">
+                                <span className="text-[10px] font-bold text-slate-900 leading-none">{task.requesterName}</span>
+                                {!isNewUser ? (
+                                    <div className="flex items-center gap-1 mt-0.5">
+                                        <Star size={8} className="fill-amber-400 text-amber-400" />
+                                        <span className="text-[9px] font-bold text-slate-500">{task.requesterRating?.toFixed(1)}</span>
+                                    </div>
+                                ) : (
+                                    <span className="text-[8px] font-bold text-blue-500 bg-blue-50 px-1 rounded mt-0.5 w-fit">НОВ</span>
+                                )}
+                            </div>
+                        </div>
+
+                        <button
+                            onClick={onOfferClick}
+                            className="relative overflow-hidden bg-gradient-to-r from-emerald-500 to-teal-600 text-white px-3 py-2 rounded-xl text-[10px] font-black uppercase tracking-wider shadow-lg shadow-emerald-500/30 flex items-center gap-1.5 hover:scale-105 active:scale-95 transform transition-all duration-300 group/btn border border-emerald-400/20"
+                        >
+                            <div className="absolute inset-0 bg-gradient-to-tr from-white/20 to-transparent opacity-0 group-hover/btn:opacity-100 transition-opacity"></div>
+                            <div className="absolute -inset-full top-0 block h-full w-1/2 -skew-x-12 bg-gradient-to-r from-transparent to-white opacity-20 group-hover/btn:animate-shine" />
+
+                            <Zap size={12} className="text-yellow-300 fill-yellow-300 animate-pulse relative z-10" />
+                            <span className="relative z-10 text-white drop-shadow-sm">ДАЙ ОФЕРТА!</span>
+                        </button>
+                    </div>
+
+                </div>
+            </div>
+            <style>{`
+        @keyframes shine {
+            100% {
+                left: 125%;
+            }
+        }
+        .group-hover\\/btn\\:animate-shine {
+            animation: shine 1s;
+        }
+      `}</style>
         </div>
-      </div>
-    </div>
-  );
+    );
 };
