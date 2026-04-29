@@ -59,14 +59,15 @@ export const sendMessageToGemini = async (
     const systemInstruction = `
         ТИ СИ ЕКСПЕРТЕН КООРДИНАТОР (NEEDO AI). ТВОЯТА ЦЕЛ Е ДА СЪБЕРЕШ ИНФО И ДА СЪЗДАДЕШ ОБЯВА.
         
-        >>> ПРАВИЛА ЗА ДИАЛОГ <<<
-        1. ВЪПРОСИ: Задавай САМО ПО ЕДИН въпрос на съобщение.
-        2. ЛИМИТ: Имаш право на МАКСИМУМ 3 въпроса общо. Ти си на въпрос номер ${questionCount + 1}.
-        3. ФИНАЛИЗИРАНЕ: Ако имаш достатъчно инфо ИЛИ ако вече си задал 3 въпроса, СТОП С ВЪПРОСИТЕ и върни JSON.
+        >>> ЖЕЛЕЗНИ ПРАВИЛА <<<
+        1. ЕЗИК: ВИНАГИ ОТГОВАРЯЙ САМО НА БЪЛГАРСКИ ЕЗИК.
+        2. КРАТКОСТ: Задавай САМО ПО ЕДИН кратък въпрос (максимум 10 думи).
+        3. БЕЗ ОПИСАНИЯ: НИКОГА не описвай какво виждаш на снимката. Не размишлявай на глас.
+        4. ЛИМИТ: Имаш право на МАКСИМУМ 3 въпроса. Ти си на въпрос номер ${questionCount + 1}.
         
-        >>> СТИЛ <<<
-        - Пиши от името на клиента (1-во лице).
-        - Без любезности. Само въпрос или JSON.
+        >>> ПРОЦЕС <<<
+        - Ако имаш инфо или си на 3-ти въпрос -> върни JSON.
+        - Иначе -> задай САМО краткия въпрос на български.
         
         >>> ФОРМАТ JSON <<<
         {"title": "...", "description": "...", "category": "..."}
@@ -98,14 +99,12 @@ export const sendMessageToGemini = async (
     
     const jsonMatch = text.match(/\{[\s\S]*\}/);
     
-    // Force finalization if limit reached or JSON present
     if (jsonMatch && (questionCount >= 1 || text.includes('category'))) {
       try {
         analysis = JSON.parse(jsonMatch[0]);
       } catch (e) {}
     }
 
-    // Auto-finalize if we hit 3 questions regardless of AI output
     if (questionCount >= 3 && !analysis) {
        const mainTask = history[0]?.text || message;
        analysis = { 
@@ -117,10 +116,10 @@ export const sendMessageToGemini = async (
 
     let cleanText = text.replace(/```json[\s\S]*?```/g, "").replace(/\{[\s\S]*\}/g, "").trim();
     if (analysis) return { text: "", analysis };
-    return { text: cleanText || "Моля, отговорете на въпроса.", analysis };
+    return { text: cleanText || "Какви са детайлите?", analysis };
   } catch (error: any) {
     console.error("Gemini Error:", error?.message || String(error));
-    return { text: "", error: `Грешка при анализа: ${error?.message || "Опитайте отново"}` };
+    return { text: "", error: "Грешка в анализа. Моля, опитайте пак." };
   }
 };
 
@@ -130,7 +129,7 @@ export const getOfferHelpQuestion = async (taskTitle: string, taskDesc: string):
   try {
     const response = await ai.models.generateContent({
       model: 'gemini-2.5-flash',
-      contents: `Задай въпрос за задача: "${taskTitle}".`,
+      contents: `Задай кратък въпрос на български за задача: "${taskTitle}".`,
     });
     return response.text.trim();
   } catch (error) {
@@ -144,7 +143,7 @@ export const generateOfferPitch = async (taskTitle: string, providerAnswer: stri
   try {
     const response = await ai.models.generateContent({
       model: 'gemini-2.5-flash',
-      contents: `Напиши оферта за: "${taskTitle}". Отговор: "${providerAnswer}".`,
+      contents: `Напиши кратка оферта на български за: "${taskTitle}". Отговор: "${providerAnswer}".`,
     });
     return response.text.trim();
   } catch (error) {
