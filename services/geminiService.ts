@@ -53,49 +53,39 @@ export const sendMessageToGemini = async (
   if (!ai) return { text: "", error: "AI услугата не е инициализирана." };
   
   try {
-    const systemInstruction = `
+    const systemPrompt = `
         ТИ СИ ЕКСПЕРТЕН АСИСТЕНТ (NEEDO AI). ТВОЯТА ЦЕЛ Е ДА СЪЗДАДЕШ ПЕРФЕКТНАТА ОБЯВА ЗА УСЛУГА.
         
-        >>> 1. АНАЛИЗ НА СНИМКАТА (СУПЕР ПРИОРИТЕТ) <<<
-        Ако потребителят е качил снимка, ТЯ Е ТВОЯТ ГЛАВЕН ИЗТОЧНИК! 
-        - Виж какво точно трябва да се направи (ремонт, почистване, монтаж).
-        - Оцени мащаба на работата от снимката.
+        ЗАДАЧА: Анализирай описанието и снимката от потребителя.
         
-        >>> 2. ПРАВИЛА ЗА КОМУНИКАЦИЯ <<<
-        - Твоята роля е да мислиш като МАЙСТОР/ПРОФЕСИОНАЛИСТ, който ще изпълни задачата.
-        - ПИТАЙ САМО АКО ЛИПСВА КРИТИЧНА ИНФОРМАЦИЯ (напр. размери, вид материал, достъп до обекта).
-        - НИКОГА НЕ ЗАДАВАЙ ВЪПРОСИ ЗА ЛОКАЦИЯ ИЛИ ВРЕМЕ - системата ги събира автоматично.
-        - Ако информацията е достатъчна, НЕ ЗАДАВАЙ ВЪПРОСИ. Директно дай крайния JSON.
-
-        >>> 3. СТРУКТУРА НА ОБЯВАТА <<<
-        - ЗАГЛАВИЕ: Кратко, ясно и привличащо вниманието (напр. "Професионално боядисване на хол 25м2").
-        - ОПИСАНИЕ: Структурирано, с булети, включващо всички детайли от текста и снимката на потребителя. Използвай професионален тон.
-
-        >>> 4. КРАЕН РЕЗУЛТАТ (JSON) <<<
-        Ако имаш достатъчно инфо, ВИНАГИ завършвай отговора си с този JSON формат:
-        {"title": "...", "description": "...", "category": "..."}
+        ПРАВИЛА:
+        1. Ако снимката показва какво трябва да се направи, използвай я като главен източник.
+        2. Ако информацията е пълна, върни JSON: {"title": "...", "description": "...", "category": "..."}.
+        3. Описанието в JSON трябва да е професионално оформено с булети.
+        4. Ако липсва важна информация за майстора (размери, детайли), задай ЕДИН кратък въпрос.
+        5. НИКОГА не питай за локация или време.
         
-        Ако трябва да питаш нещо, напиши въпроса си кратко и любезно.
+        ПОТРЕБИТЕЛСКО ОПИСАНИЕ: ${message}
     `;
 
-    const contents = imageBase64 
-      ? [systemInstruction, message, { inlineData: { mimeType: "image/jpeg", data: imageBase64.split(',')[1] } }] 
-      : [systemInstruction, message];
+    const parts: any[] = [systemPrompt];
+    if (imageBase64) {
+      parts.push({ inlineData: { mimeType: "image/jpeg", data: imageBase64.split(',')[1] } });
+    }
 
     const response = await ai.models.generateContent({
       model: 'gemini-2.5-flash',
-      contents: contents,
+      contents: parts,
     });
 
     const text = response.text;
-    let analysis: AIAnalysisResult | undefined;
-    const jsonStart = text.indexOf('{');
-    const jsonEnd = text.lastIndexOf('}');
     
-    if (jsonStart !== -1 && jsonEnd !== -1 && jsonEnd > jsonStart) {
+    // Check for JSON
+    let analysis: AIAnalysisResult | undefined;
+    const jsonMatch = text.match(/\{[\s\S]*\}/);
+    if (jsonMatch) {
       try {
-        const potentialJson = text.substring(jsonStart, jsonEnd + 1);
-        analysis = JSON.parse(potentialJson);
+        analysis = JSON.parse(jsonMatch[0]);
       } catch (e) {}
     }
 
