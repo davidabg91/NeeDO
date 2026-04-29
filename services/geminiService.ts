@@ -36,7 +36,7 @@ export const estimateTaskPrice = async (title: string, description: string): Pro
   try {
     const response = await ai.models.generateContent({
       model: 'gemini-2.5-flash',
-      contents: `Оцени задача: "${title}". Само цена в EUR.`,
+      contents: `Оцени задача: "${title}". Дай само цена в EUR.`,
     });
     return response.text.trim();
   } catch (error) {
@@ -56,20 +56,32 @@ export const sendMessageToGemini = async (
   try {
     const questionCount = Math.floor(history.length / 2);
     
-    // Hardening the prompt by making it extremely direct
-    const promptHeader = `ВИНАГИ ОТГОВАРЯЙ САМО НА БЪЛГАРСКИ. 
-КРАТКОСТ: МАКСИМУМ 10 ДУМИ. 
-БЕЗ ОПИСАНИЯ НА СНИМКАТА.
-АКО СИ НА ВЪПРОС 3 ИЛИ ИМАШ ИНФО -> ВЪРНИ JSON.
-JSON: {"title": "...", "description": "...", "category": "..."}
-ТЕКУЩ ВЪПРОС: ${questionCount + 1}/3.`;
+    const identityInstruction = `
+        ТИ СИ ЕКСПЕРТЕН АСИСТЕНТ НА NeeDO. ТВОЯТА МИСИЯ Е ДА СЪЗДАВАШ ПРОФЕСИОНАЛНИ ОБЯВИ.
+        
+        >>> ТВОЯТА РОЛЯ <<<
+        - ТИ СИ МОСТЪТ между клиента и майстора.
+        - АНАЛИЗИРАЙ текста и снимката заедно.
+        - МИСЛИ КАТО МАЙСТОР: Питай само за детайлите, които са КРИТИЧНИ за определяне на цена и оферта (размери, материали, специфики).
+        - БЪДИ КРАТЪК: Задавай само по един технически въпрос на български.
+        
+        >>> ТВОЯТА ЦЕЛ <<<
+        - Събери важната информация и я оформи в професионална обява от 1-во лице ("Търся...", "Трябва ми...").
+        - Обявата трябва да информира изпълнителите максимално добре.
+        
+        >>> СТРОГИ ПРАВИЛА <<<
+        1. ВИНАГИ ОТГОВАРЯЙ НА БЪЛГАРСКИ.
+        2. МАКСИМУМ 3 ВЪПРОСА. Ти си на въпрос ${questionCount + 1}.
+        3. БЕЗ ОПИСАНИЯ НА СНИМКАТА И БЕЗ ЛЮБЕЗНОСТИ.
+        4. САМО ВЪПРОС ИЛИ JSON: {"title": "...", "description": "...", "category": "..."}
+    `;
 
     const contents: any[] = history.map((h, i) => ({
       role: h.role === 'ai' ? 'model' : 'user',
-      parts: [{ text: (i === 0 ? promptHeader + "\n" : "") + h.text }]
+      parts: [{ text: (i === 0 ? identityInstruction + "\n" : "") + h.text }]
     }));
 
-    const currentParts: any[] = [{ text: (contents.length === 0 ? promptHeader + "\n" : "") + message }];
+    const currentParts: any[] = [{ text: (contents.length === 0 ? identityInstruction + "\n" : "") + message }];
     if (imageBase64) {
       currentParts.push({ inlineData: { mimeType: "image/jpeg", data: imageBase64.split(',')[1] } });
     }
@@ -81,12 +93,12 @@ JSON: {"title": "...", "description": "...", "category": "..."}
 
     const response = await ai.models.generateContent({
       model: 'gemini-2.5-flash',
+      systemInstruction: identityInstruction,
       contents: contents,
     });
 
     const text = response.text || "";
     let analysis: AIAnalysisResult | undefined;
-    
     const jsonMatch = text.match(/\{[\s\S]*\}/);
     
     if (jsonMatch && (questionCount >= 1 || text.includes('category'))) {
@@ -119,7 +131,7 @@ export const getOfferHelpQuestion = async (taskTitle: string, taskDesc: string):
   try {
     const response = await ai.models.generateContent({
       model: 'gemini-2.5-flash',
-      contents: `Кратък въпрос на български за: "${taskTitle}".`,
+      contents: `Въпрос на български за: "${taskTitle}".`,
     });
     return response.text.trim();
   } catch (error) {
