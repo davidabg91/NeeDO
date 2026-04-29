@@ -7,7 +7,8 @@ import {
   updateProfile,
   User as FirebaseUser,
   GoogleAuthProvider,
-  signInWithPopup
+  signInWithPopup,
+  sendPasswordResetEmail
 } from 'firebase/auth';
 import { doc, setDoc, getDoc, getDocs, collection, updateDoc, query, where } from 'firebase/firestore';
 import { User } from '../types';
@@ -186,6 +187,15 @@ export const registerUserWithPassword = async (
 
 export const logoutUser = async () => {
   await firebaseSignOut(auth);
+};
+
+export const resetPassword = async (email: string) => {
+  try {
+    await sendPasswordResetEmail(auth, email);
+  } catch (error: any) {
+    console.error("Reset password error:", error.message);
+    throw error;
+  }
 };
 
 export const getUserById = async (id: string): Promise<User | undefined> => {

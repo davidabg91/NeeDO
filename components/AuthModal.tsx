@@ -1,7 +1,7 @@
 
 import React, { useState } from 'react';
 import { X, Mail, Lock, User as UserIcon, ArrowRight, Loader2, Phone, Sparkles, Building2, Calendar, CheckSquare, Square, ChevronRight, Camera, Zap, ShieldCheck, Coins } from 'lucide-react';
-import { loginUser, registerUserWithPassword, loginWithGoogle, updateUserProfile } from '../services/authService';
+import { loginUser, registerUserWithPassword, loginWithGoogle, updateUserProfile, resetPassword } from '../services/authService';
 import { User } from '../types';
 import { useLanguage } from '../contexts/LanguageContext';
 import { CATEGORIES_LIST } from '../constants';
@@ -23,6 +23,7 @@ export const AuthModal: React.FC<AuthModalProps> = ({ isOpen, onClose, onLoginSu
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState('');
   const [pendingGoogleUser, setPendingGoogleUser] = useState<User | null>(null);
+  const [resetSent, setResetSent] = useState(false);
 
   // Registration Specifics
   const [agreedToTerms, setAgreedToTerms] = useState(false);
@@ -403,6 +404,32 @@ export const AuthModal: React.FC<AuthModalProps> = ({ isOpen, onClose, onLoginSu
                                             minLength={6}
                                         />
                                     </div>
+                                    {mode === 'LOGIN' && (
+                                        <div className="flex justify-end mt-1.5">
+                                            <button 
+                                                type="button"
+                                                onClick={async () => {
+                                                    if (!email) {
+                                                        setError('Моля, въведете вашия имейл първо.');
+                                                        return;
+                                                    }
+                                                    setIsLoading(true);
+                                                    try {
+                                                        await resetPassword(email);
+                                                        setResetSent(true);
+                                                        setError('');
+                                                    } catch (err: any) {
+                                                        setError('Грешка при изпращане. Проверете имейла.');
+                                                    } finally {
+                                                        setIsLoading(false);
+                                                    }
+                                                }}
+                                                className="text-[10px] font-bold text-blue-600 hover:text-blue-700 hover:underline transition-colors"
+                                            >
+                                                {resetSent ? 'Имейлът е изпратен!' : 'Забравена парола?'}
+                                            </button>
+                                        </div>
+                                    )}
                                 </div>
                             </>
                         )}
