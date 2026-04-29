@@ -40,6 +40,8 @@ import { onAuthStateChanged } from 'firebase/auth';
 import { CATEGORIES_LIST } from './constants';
 import { LanguageProvider, useLanguage } from './contexts/LanguageContext';
 import { LanguageSwitcher } from './components/LanguageSwitcher';
+import { PaymentModal } from './components/PaymentModal';
+import { stripeService } from './services/stripeService';
 
 const UI_CATEGORIES = [
     { id: 'Всички', labelKey: 'cat_all', icon: '🌍' },
@@ -98,6 +100,13 @@ const AppContent: React.FC = () => {
     const [searchQuery, setSearchQuery] = useState('');
     const [sortBy, setSortBy] = useState<SortOption>('DISTANCE');
     const [cityFilter, setCityFilter] = useState('');
+
+    // STRIPE PAYMENT STATE
+    const [isPaymentModalOpen, setIsPaymentModalOpen] = useState(false);
+    const [stripeClientSecret, setStripeClientSecret] = useState<string | null>(null);
+    const [paymentAmount, setPaymentAmount] = useState<number>(0);
+    const [pendingPaymentTaskId, setPendingPaymentTaskId] = useState<string | null>(null);
+    const [paymentIntentId, setPaymentIntentId] = useState<string | null>(null);
 
     const [mapCenter, setMapCenter] = useState<[number, number]>([42.6977, 23.3219]);
     const [userLocation, setUserLocation] = useState<[number, number] | null>(null);
@@ -533,10 +542,40 @@ const AppContent: React.FC = () => {
         const task = tasks.find(t => t.id === taskId);
         if (!task) return;
         const offer = task.offers.find(o => o.id === task.acceptedOfferId);
+        if (!offer) return;
 
-        await updateTaskStatus(taskId, TaskStatus.IN_PROGRESS, { escrowAmount: offer?.price });
+        setPendingPaymentTaskId(taskId);
+        setPaymentAmount(offer.price);
+        setIsPaymentModalOpen(true);
+        setStripeClientSecret(null);
 
-        if (offer) {
+        try {
+            const { clientSecret, paymentIntentId } = await stripeService.createPaymentIntent(taskId, offer.price);
+            setStripeClientSecret(clientSecret);
+            setPaymentIntentId(paymentIntentId);
+        } catch (error) {
+            console.error("Failed to create payment intent", error);
+            alert("Грешка при създаване на плащане. Моля опитайте по-късно.");
+            setIsPaymentModalOpen(false);
+        }
+    };
+
+    const handlePaymentSuccess = async () => {
+        if (!pendingPaymentTaskId) return;
+        const taskId = pendingPaymentTaskId;
+        const task = tasks.find(t => t.id === taskId);
+        const offer = task?.offers.find(o => o.id === task?.acceptedOfferId);
+        
+        setIsPaymentModalOpen(false);
+        setPendingPaymentTaskId(null);
+        setStripeClientSecret(null);
+
+        await updateTaskStatus(taskId, TaskStatus.IN_PROGRESS, { 
+            escrowAmount: paymentAmount,
+            paymentIntentId: paymentIntentId || undefined
+        });
+
+        if (offer && task) {
             await sendNotification({
                 userId: offer.providerId,
                 type: 'PAYMENT_RELEASED',
@@ -598,6 +637,23 @@ const AppContent: React.FC = () => {
             comment: providerReview,
             createdAt: Date.now()
         };
+
+        if (task.paymentIntentId) {
+            try {
+                const providerUser = await getUserById(offer.providerId);
+                const providerAccountId = providerUser?.stripeAccountId;
+                if (providerAccountId) {
+                    await stripeService.releaseEscrow(task.paymentIntentId, providerAccountId, offer.price);
+                } else {
+                    console.error("Provider has no Stripe account linked to receive funds.");
+                    alert("Внимание: Изпълнителят няма свързан Stripe акаунт за получаване на превода. Моля свържете се с поддръжката.");
+                }
+            } catch (error) {
+                console.error("Failed to release escrow via Stripe", error);
+                alert("Грешка при освобождаване на плащането. Моля опитайте пак.");
+                return; // stop execution if payment fails
+            }
+        }
 
         await addReviewToTask(taskId, newReview);
         await updateTaskStatus(taskId, TaskStatus.CLOSED);
@@ -1276,6 +1332,18 @@ const AppContent: React.FC = () => {
                 isOpen={isLegalModalOpen}
                 onClose={() => setIsLegalModalOpen(false)}
                 initialSection={legalModalSection}
+            />
+
+            <PaymentModal
+                isOpen={isPaymentModalOpen}
+                onClose={() => {
+                    setIsPaymentModalOpen(false);
+                    setPendingPaymentTaskId(null);
+                    setStripeClientSecret(null);
+                }}
+                clientSecret={stripeClientSecret}
+                amountEuro={paymentAmount}
+                onSuccess={handlePaymentSuccess}
             />
         </div>
     );

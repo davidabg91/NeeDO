@@ -112,6 +112,7 @@ export interface Task {
   offers: Offer[];
   acceptedOfferId?: string;
   escrowAmount?: number;
+  paymentIntentId?: string; // ID of the Stripe Payment Intent used for escrow
   reviews?: Review[];
   questions?: TaskQuestion[];
   imageUrl?: string;

@@ -6,6 +6,7 @@ import { StarRating } from './StarRating';
 import { updateUserProfile } from '../services/authService';
 import { CATEGORIES_LIST } from '../constants';
 import { useLanguage } from '../contexts/LanguageContext';
+import { stripeService } from '../services/stripeService';
 
 interface UserProfileProps {
   user: User;
@@ -170,25 +171,19 @@ export const UserProfile: React.FC<UserProfileProps> = ({
       }
   };
 
-  // MOCK STRIPE CONNECT
+  // REAL STRIPE CONNECT
   const handleConnectStripe = async () => {
       setIsConnectingStripe(true);
       try {
-          // Simulation of OAuth redirect or Backend API call
-          await new Promise(resolve => setTimeout(resolve, 2000));
+          // Call the backend function to create an account and get the onboarding URL
+          const url = await stripeService.createConnectAccount(user.id);
           
-          const mockStripeId = `acct_1${Date.now().toString().slice(-8)}`;
-          
-          await updateUserProfile(user.id, {
-              stripeAccountId: mockStripeId,
-              stripeOnboardingComplete: true
-          });
-          
-          if (onUserUpdate) onUserUpdate({ stripeAccountId: mockStripeId, stripeOnboardingComplete: true });
+          // Redirect the user to Stripe's hosted onboarding flow
+          window.location.href = url;
           
       } catch (e) {
           console.error("Stripe connect failed", e instanceof Error ? e.message : String(e));
-          alert("Възникна грешка при свързването със Stripe.");
+          alert("Възникна грешка при свързването със Stripe: " + (e instanceof Error ? e.message : ""));
       } finally {
           setIsConnectingStripe(false);
       }
