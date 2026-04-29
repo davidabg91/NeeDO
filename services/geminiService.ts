@@ -7,10 +7,15 @@ let aiInstance: GoogleGenAI | null = null;
 const getAI = (): GoogleGenAI | null => {
   if (aiInstance) return aiInstance;
   
-  // Vite replaces these at build time. We check for common "missing" values.
-  const apiKey = process.env.API_KEY || "";
+  // Safe access to defined process.env
+  let apiKey = "";
+  try {
+    apiKey = (process.env as any).API_KEY || (process.env as any).GEMINI_API_KEY || "";
+  } catch (e) {
+    // Fallback for environments where process is not defined
+  }
   
-  if (!apiKey || apiKey === "undefined" || apiKey === "null" || apiKey.length < 5) {
+  if (!apiKey || apiKey === "undefined" || apiKey === "null" || apiKey.length < 10) {
     return null;
   }
   
@@ -27,40 +32,44 @@ export const createTaskChatSession = (): Chat | null => {
   const ai = getAI();
   if (!ai) return null;
   
-  return ai.chats.create({
-    model: 'gemini-3-flash-preview',
-    config: {
-      temperature: 0.2, 
-      systemInstruction: `
-        ТИ СИ ЕКСПЕРТЕН АСИСТЕНТ (NEEDO AI). ТВОЯТА ЦЕЛ Е ДА СЪЗДАДЕШ ПЕРФЕКТНАТА ОБЯВА ЗА УСЛУГА.
-        
-        >>> 1. АНАЛИЗ НА СНИМКАТА (СУПЕР ПРИОРИТЕТ) <<<
-        Ако потребителят е качил снимка, ТЯ Е ТВОЯТ ГЛАВЕН ИЗТОЧНИК!
-        Преди да питаш каквото и да е, АНАЛИЗИРАЙ СНИМКАТА ЗА ТЕХНИЧЕСКИ ДЕТАЙЛИ.
+  try {
+    return ai.chats.create({
+      model: 'gemini-3-flash-preview',
+      config: {
+        temperature: 0.2, 
+        systemInstruction: `
+          ТИ СИ ЕКСПЕРТЕН АСИСТЕНТ (NEEDO AI). ТВОЯТА ЦЕЛ Е ДА СЪЗДАДЕШ ПЕРФЕКТНАТА ОБЯВА ЗА УСЛУГА.
+          
+          >>> 1. АНАЛИЗ НА СНИМКАТА (СУПЕР ПРИОРИТЕТ) <<<
+          Ако потребителят е качил снимка, ТЯ Е ТВОЯТ ГЛАВЕН ИЗТОЧНИК!
+          Преди да питаш каквото и да е, АНАЛИЗИРАЙ СНИМКАТА ЗА ТЕХНИЧЕСКИ ДЕТАЙЛИ.
 
-        >>> 2. ПРАВИЛА ЗА КОМУНИКАЦИЯ (СТРОГО ЗАБРАНЕНО) <<<
-        !!! ВАЖНО: НИКОГА НЕ ЗАДАВАЙ ВЪПРОСИ ЗА:
-        1. ЛОКАЦИЯ/АДРЕС ("Къде се намира?", "Град?", "Квартал?"). Това се взима автоматично от GPS-а на телефона.
-        2. ВРЕМЕ/ДАТА ("Кога ви трябва?", "Спешно ли е?"). Това се избира от календар в следващата стъпка.
-        
-        >>> 3. КАКВО ДА ПИТАШ <<<
-        - Питай ВЕДНАГА за технически детайли, които не се виждат на снимката (размери, специфични материали, етаж без асансьор).
-        - Задавай само по 1 въпрос наведнъж.
-        - МАКСИМУМ 3 ВЪПРОСА общо.
+          >>> 2. ПРАВИЛА ЗА КОМУНИКАЦИЯ (СТРОГО ЗАБРАНЕНО) <<<
+          !!! ВАЖНО: НИКОГА НЕ ЗАДАВАЙ ВЪПРОСИ ЗА:
+          1. ЛОКАЦИЯ/АДРЕС ("Къде се намира?", "Град?", "Квартал?"). Това се взима автоматично от GPS-а на телефона.
+          2. ВРЕМЕ/ДАТА ("Кога ви трябва?", "Спешно ли е?"). Това се избира от календар в следващата стъпка.
+          
+          >>> 3. КАКВО ДА ПИТАШ <<<
+          - Питай ВЕДНАГА за технически детайли, които не се виждат на снимката (размери, специфични материали, етаж без асансьор).
+          - Задавай само по 1 въпрос наведнъж.
+          - МАКСИМУМ 3 ВЪПРОСА общо.
 
-        >>> 4. КРАЕН РЕЗУЛТАТ (JSON) <<<
-        Когато си готов, върни JSON обект. Описанието (description) трябва да е в 1-во лице.
+          >>> 4. КРАЕН РЕЗУЛТАТ (JSON) <<<
+          Когато си готов, върни JSON обект. Описанието (description) трябва да е в 1-во лице.
 
-        ```json
-        {
-          "title": "Заглавие",
-          "description": "Описание",
-          "category": "Категория"
-        }
-        ```
-      `,
-    },
-  });
+          \`\`\`json
+          {
+            "title": "Заглавие",
+            "description": "Описание",
+            "category": "Категория"
+          }
+          \`\`\`
+        `,
+      },
+    });
+  } catch (e) {
+    return null;
+  }
 };
 
 export const estimateTaskPrice = async (title: string, description: string): Promise<string> => {
