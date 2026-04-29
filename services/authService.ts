@@ -11,17 +11,17 @@ import {
   sendPasswordResetEmail
 } from 'firebase/auth';
 import { doc, setDoc, getDoc, getDocs, collection, updateDoc, query, where } from 'firebase/firestore';
-import { User } from '../types';
+import { AppUser } from '../types';
 
 // Default Site Logo Avatar (Blue background, White 'N')
 const DEFAULT_AVATAR = "https://ui-avatars.com/api/?name=N&background=2563eb&color=fff&size=128&bold=true&length=1";
 
 // Safe helper to map Firebase User to our User type with fallback
-export const syncUserProfile = async (fbUser: FirebaseUser): Promise<User> => {
+export const syncUserProfile = async (fbUser: FirebaseUser): Promise<AppUser> => {
   try {
     const userDoc = await getDoc(doc(db, "users", fbUser.uid));
     if (userDoc.exists()) {
-      const userData = userDoc.data() as User;
+      const userData = userDoc.data() as AppUser;
       // CRITICAL FIX: Ensure legacy users with 5.0 rating but 0 reviews are treated as 0 rating
       if (userData.reviewCount === 0 && userData.rating > 0) {
         userData.rating = 0;
@@ -148,7 +148,7 @@ export const registerUserWithPassword = async (
 
     await updateProfile(fbUser, { displayName: name });
 
-    const newUser: User = {
+    const newUser: AppUser = {
       id: fbUser.uid,
       name,
       email,
@@ -198,11 +198,11 @@ export const resetPassword = async (email: string) => {
   }
 };
 
-export const getUserById = async (id: string): Promise<User | undefined> => {
+export const getUserById = async (id: string): Promise<AppUser | undefined> => {
   try {
     const userDoc = await getDoc(doc(db, "users", id));
     if (userDoc.exists()) {
-        const u = userDoc.data() as User;
+        const u = userDoc.data() as AppUser;
         // Fix legacy rating for other users too
         if (u.reviewCount === 0 && u.rating > 0) {
            u.rating = 0;
@@ -217,12 +217,12 @@ export const getUserById = async (id: string): Promise<User | undefined> => {
   }
 };
 
-export const getAllUsers = async (): Promise<User[]> => {
+export const getAllUsers = async (): Promise<AppUser[]> => {
   try {
     const querySnapshot = await getDocs(collection(db, "users"));
-    const users: User[] = [];
+    const users: AppUser[] = [];
     querySnapshot.forEach((doc) => {
-        const u = doc.data() as User;
+        const u = doc.data() as AppUser;
         if (u.reviewCount === 0 && u.rating > 0) u.rating = 0;
         users.push(u);
     });
@@ -244,7 +244,7 @@ export const updateUserStatus = async (userId: string, status: 'ACTIVE' | 'BANNE
     }
 };
 
-export const updateUserProfile = async (userId: string, data: Partial<User>) => {
+export const updateUserProfile = async (userId: string, data: Partial<AppUser>) => {
     try {
         const userRef = doc(db, "users", userId);
         await updateDoc(userRef, data);
@@ -255,13 +255,13 @@ export const updateUserProfile = async (userId: string, data: Partial<User>) => 
     }
 };
 
-export const getProvidersByCategory = async (category: string): Promise<User[]> => {
+export const getProvidersByCategory = async (category: string): Promise<AppUser[]> => {
     try {
         const q = query(collection(db, "users"), where("businessCategories", "array-contains", category));
         const querySnapshot = await getDocs(q);
-        const users: User[] = [];
+        const users: AppUser[] = [];
         querySnapshot.forEach((doc) => {
-            users.push(doc.data() as User);
+            users.push(doc.data() as AppUser);
         });
         return users;
     } catch (error) {

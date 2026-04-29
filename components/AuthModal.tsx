@@ -2,14 +2,14 @@
 import React, { useState } from 'react';
 import { X, Mail, Lock, User as UserIcon, ArrowRight, Loader2, Phone, Sparkles, Building2, Calendar, CheckSquare, Square, ChevronRight, Camera, Zap, ShieldCheck, Coins } from 'lucide-react';
 import { loginUser, registerUserWithPassword, loginWithGoogle, updateUserProfile, resetPassword } from '../services/authService';
-import { User } from '../types';
+import { AppUser } from '../types';
 import { useLanguage } from '../contexts/LanguageContext';
 import { CATEGORIES_LIST } from '../constants';
 
 interface AuthModalProps {
   isOpen: boolean;
   onClose: () => void;
-  onLoginSuccess: (user: User) => void;
+  onLoginSuccess: (user: AppUser) => void;
   onOpenLegal?: (section: 'TERMS' | 'PRIVACY') => void;
 }
 
@@ -22,7 +22,7 @@ export const AuthModal: React.FC<AuthModalProps> = ({ isOpen, onClose, onLoginSu
   const [password, setPassword] = useState(''); 
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState('');
-  const [pendingGoogleUser, setPendingGoogleUser] = useState<User | null>(null);
+  const [pendingGoogleUser, setPendingGoogleUser] = useState<AppUser | null>(null);
   const [resetSent, setResetSent] = useState(false);
 
   // Registration Specifics

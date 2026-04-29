@@ -12,7 +12,7 @@ import { NotificationsView } from './components/NotificationsView';
 import { AdminDashboard } from './components/AdminDashboard';
 import { LegalInfoModal } from './components/LegalInfoModal';
 import { WelcomeOnboardingModal } from './components/WelcomeOnboardingModal';
-import { Task, TaskStatus, AIAnalysisResult, Offer, Review, User, Notification, TaskQuestion, Dispute } from './types';
+import { Task, TaskStatus, AIAnalysisResult, Offer, Review, AppUser, Notification, TaskQuestion, Dispute } from './types';
 import { calculateDistance } from './utils/geo';
 import { getAllUsers, getUserById, logoutUser, syncUserProfile, getProvidersByCategory } from './services/authService';
 import {
@@ -112,12 +112,12 @@ const AppContent: React.FC = () => {
     const [userLocation, setUserLocation] = useState<[number, number] | null>(null);
     const [mapViewTrigger, setMapViewTrigger] = useState(0);
 
-    const [currentUser, setCurrentUser] = useState<User | null>(null);
+    const [currentUser, setCurrentUser] = useState<AppUser | null>(null);
     const [isAuthModalOpen, setIsAuthModalOpen] = useState(false);
     const [authLoading, setAuthLoading] = useState(true);
 
-    const [viewingProfileUser, setViewingProfileUser] = useState<User | null>(null);
-    const [allUsers, setAllUsers] = useState<User[]>([]);
+    const [viewingProfileUser, setViewingProfileUser] = useState<AppUser | null>(null);
+    const [allUsers, setAllUsers] = useState<AppUser[]>([]);
     const [viewMode, setViewMode] = useState<'MAP' | 'LIST' | 'PROFILE' | 'NOTIFICATIONS' | 'ADMIN'>('MAP');
 
     const [pendingTaskData, setPendingTaskData] = useState<{ analysis: AIAnalysisResult, images: string[], locationMode: string, manualAddress?: string, manualCoordinates?: { lat: number, lng: number }, estimatedPrice?: string, timing?: string } | null>(null);
@@ -410,7 +410,7 @@ const AppContent: React.FC = () => {
         }
     };
 
-    const executeTaskCreation = async (analysis: AIAnalysisResult, images: string[], locationMode: string, manualAddress?: string, manualCoordinates?: { lat: number, lng: number }, estimatedPrice?: string, timing?: string, user?: User) => {
+    const executeTaskCreation = async (analysis: AIAnalysisResult, images: string[], locationMode: string, manualAddress?: string, manualCoordinates?: { lat: number, lng: number }, estimatedPrice?: string, timing?: string, user?: AppUser) => {
         const userToUse = user || currentUser;
         if (!userToUse) return;
 

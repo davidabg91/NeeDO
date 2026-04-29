@@ -1,6 +1,6 @@
 
 import React, { useState, useEffect, useRef, useCallback } from 'react';
-import { Notification, Task, User, DirectMessage, TaskStatus } from '../types';
+import { Notification, Task, AppUser, DirectMessage, TaskStatus } from '../types';
 import { Bell, CheckCircle, DollarSign, Briefcase, Info, Clock, MessageCircle, Send, ChevronLeft, User as UserIcon, ExternalLink, Loader2, ArrowUpCircle } from 'lucide-react';
 import { subscribeToDirectMessages, sendDirectMessage, markNotificationRead, fetchOlderMessages } from '../services/dataService';
 import { useLanguage } from '../contexts/LanguageContext';
@@ -8,7 +8,7 @@ import { useLanguage } from '../contexts/LanguageContext';
 interface NotificationsViewProps {
   notifications: Notification[];
   tasks: Task[]; // Need tasks to generate chat list
-  currentUser: User | null;
+  currentUser: AppUser | null;
   onNotificationClick: (notification: Notification) => void;
   onMarkAllRead: () => void;
   onChatOpen?: (isOpen: boolean) => void; // Call this to hide nav bar in App.tsx
@@ -244,7 +244,7 @@ const NotificationList = ({ notifications, onClick }: { notifications: Notificat
     );
 };
 
-const ChatList = ({ tasks, currentUser, notifications, onSelectTask }: { tasks: Task[], currentUser: User | null, notifications: Notification[], onSelectTask: (t: Task) => void }) => {
+const ChatList = ({ tasks, currentUser, notifications, onSelectTask }: { tasks: Task[], currentUser: AppUser | null, notifications: Notification[], onSelectTask: (t: Task) => void }) => {
     const { t } = useLanguage();
     if (!currentUser) return null;
 
@@ -371,7 +371,7 @@ const ChatList = ({ tasks, currentUser, notifications, onSelectTask }: { tasks: 
 
 // --- CHAT WINDOW (Inside Notifications View) ---
 
-const ChatWindow = ({ task, currentUser, onBack, onTaskClick }: { task: Task, currentUser: User, onBack: () => void, onTaskClick?: (t: Task) => void }) => {
+const ChatWindow = ({ task, currentUser, onBack, onTaskClick }: { task: Task, currentUser: AppUser, onBack: () => void, onTaskClick?: (t: Task) => void }) => {
     const { t } = useLanguage();
     // ... existing chat logic ...
     const [liveMessages, setLiveMessages] = useState<DirectMessage[]>([]);

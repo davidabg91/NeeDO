@@ -1,12 +1,12 @@
 
 import React, { useState, useEffect, useMemo } from 'react';
-import { User, Task, TaskStatus, DirectMessage } from '../types';
+import { AppUser, Task, TaskStatus, DirectMessage } from '../types';
 import { Users, Briefcase, DollarSign, TrendingUp, Search, ShieldAlert, LogOut, Map, Trash2, Ban, CheckCircle, AlertTriangle, MessageCircle, X, Menu, MoreVertical, Phone, Mail, FileWarning, Calendar, MapPin, CreditCard, ChevronRight } from 'lucide-react';
 import { subscribeToDirectMessages, subscribeToTaskOffers, subscribeToTaskQuestions, subscribeToTaskReviews } from '../services/dataService';
 import { UserProfile } from './UserProfile';
 
 interface AdminDashboardProps {
-    users: User[];
+    users: AppUser[];
     tasks: Task[];
     onLogout: () => void;
     onSwitchToApp: () => void;
@@ -30,7 +30,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
     const [isSidebarOpen, setIsSidebarOpen] = useState(false);
 
     // Detail View States
-    const [selectedUser, setSelectedUser] = useState<User | null>(null);
+    const [selectedUser, setSelectedUser] = useState<AppUser | null>(null);
     const [selectedTask, setSelectedTask] = useState<Task | null>(null);
 
     // --- Detail Subscriptions for Admin view ---

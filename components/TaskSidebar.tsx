@@ -1,6 +1,6 @@
 
 import React, { useState, useRef, useEffect } from 'react';
-import { Task, TaskStatus, Offer, Review, User } from '../types';
+import { Task, TaskStatus, Offer, Review, AppUser } from '../types';
 import { X, DollarSign, Clock, User as UserIcon, ShieldCheck, Briefcase, MapPin, Calendar, AlignLeft, ChevronDown, Zap, TrendingDown, Image as ImageIcon, Camera, UploadCloud, Quote, Star, ChevronRight, ChevronLeft, CheckCircle, MessageSquare, Timer, CalendarClock, ArrowRight, Map, Phone, Lock, ZoomIn, Heart, Sparkles, LogIn, Trash2, Building2, PlayCircle, CreditCard, AlertTriangle, AlertCircle, Coins, Info, Check, Trophy, Rocket, ExternalLink, MessageCircle, Tag, Navigation, Verified, Eye, Layers, Wand2, Loader2, FileWarning, Hourglass, Share2, Link2, Copy, Hammer, Award, FileText, BadgeCheck, Users } from 'lucide-react';
 import { StarRating } from './StarRating';
 import { getUserById, syncUserProfile } from '../services/authService';
@@ -54,10 +54,10 @@ export const TaskSidebar: React.FC<TaskSidebarProps> = ({
 
     // --- STATE ---
     const [isVisible, setIsVisible] = useState(false);
-    const [me, setMe] = useState<User | null>(null);
+    const [me, setMe] = useState<AppUser | null>(null);
 
     // Real-time requester data (to fix 0.0 rating issue)
-    const [requesterProfile, setRequesterProfile] = useState<User | null>(null);
+    const [requesterProfile, setRequesterProfile] = useState<AppUser | null>(null);
 
     // Form States
     const [offerPrice, setOfferPrice] = useState('');

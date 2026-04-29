@@ -1,11 +1,11 @@
 
 import React, { useState, useRef, useEffect } from 'react';
-import { Task, User } from '../types';
+import { Task, AppUser } from '../types';
 import { Send, ShieldCheck, ChevronDown, CheckCircle, X, HelpCircle, FileText, FileQuestion, Calendar, AlertCircle } from 'lucide-react';
 
 interface TaskQAPanelProps {
   task: Task;
-  currentUser: User | null;
+  currentUser: AppUser | null;
   onAskQuestion: (taskId: string, text: string) => void;
   onAnswerQuestion: (taskId: string, questionId: string, answer: string) => void;
   isOpen: boolean;

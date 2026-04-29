@@ -1,6 +1,5 @@
-
 import React, { useState, useRef } from 'react';
-import { User, Task, TaskStatus } from '../types';
+import { AppUser, Task, TaskStatus } from '../types';
 import { X, Star, Settings, Wallet, CreditCard, Check, Loader2, Building2, LogOut, Camera, ChevronRight, Calendar, ShieldCheck, Briefcase, MapPin, Grid, Heart, Clock, ArrowRight, Layout, Zap, Edit2, ExternalLink, Award, TrendingUp, Bell, User as UserIcon, Tag, Sparkles, AlertCircle, Link } from 'lucide-react';
 import { StarRating } from './StarRating';
 import { updateUserProfile } from '../services/authService';
@@ -9,14 +8,14 @@ import { useLanguage } from '../contexts/LanguageContext';
 import { stripeService } from '../services/stripeService';
 
 interface UserProfileProps {
-  user: User;
+  user: AppUser;
   tasks: Task[];
   isOpen: boolean;
   onClose: () => void;
   onLogout: () => void;
   onTaskClick: (task: Task) => void;
   isCurrentUserProfile?: boolean;
-  onUserUpdate?: (data: Partial<User>) => void;
+  onUserUpdate?: (data: Partial<AppUser>) => void;
 }
 
 const DEFAULT_AVATAR = "https://ui-avatars.com/api/?name=N&background=007AFF&color=fff&size=128&bold=true&length=1";
