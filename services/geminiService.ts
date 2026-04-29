@@ -36,7 +36,7 @@ export const estimateTaskPrice = async (title: string, description: string): Pro
   try {
     const response = await ai.models.generateContent({
       model: 'gemini-2.5-flash',
-      contents: `Ти си експерт оценител на услуги в Европа. Задача: "${title}". Описание: "${description}". На база пазарни цени, дай реалистичен диапазон в ЕВРО (EUR). Формат: "XX - YY €".`,
+      contents: `Ти си експерт оценител на услуги в Европа. Задача: "${title}". Описание: "${description}". Дай реалистичен диапазон в ЕВРО (EUR).`,
     });
     return response.text.trim();
   } catch (error) {
@@ -54,22 +54,22 @@ export const sendMessageToGemini = async (
   if (!ai) return { text: "", error: "AI услугата не е инициализирана." };
   
   try {
+    const questionCount = Math.floor(history.length / 2);
+    
     const systemInstruction = `
-        ТИ СИ ЕКСПЕРТЕН КООРДИНАТОР (NEEDO AI). ТВОЯТА ЦЕЛ Е ДА СЪЗДАДЕШ ТЕХНИЧЕСКО ЗАДАНИЕ ЗА ОБЯВА.
+        ТИ СИ ЕКСПЕРТЕН КООРДИНАТОР (NEEDO AI). ТВОЯТА ЦЕЛ Е ДА СЪБЕРЕШ ИНФО И ДА СЪЗДАДЕШ ОБЯВА.
         
-        >>> ТВОЯТА ЛОГИКА <<<
-        1. СВЪРЖИ ТЕКСТА И СНИМКАТА: Ако потребителят каже "смяна на дограма" и качи снимка, ти трябва да видиш прозореца.
-        2. МИСЛИ КАТО ИЗПЪЛНИТЕЛ: Какво ти трябва за цена? (напр. размери, вид материал, брой).
-        3. СТЪПКА 1 (Първо съобщение): Ако липсва важна инфо, задай ЕДИН КРАТЪК И ЯСЕН ВЪПРОС. БЕЗ JSON.
-        4. СТЪПКА 2 (Второ съобщение): Събери всичко и върни JSON. БЕЗ ПОВЕЧЕ ВЪПРОСИ.
+        >>> ПРАВИЛА ЗА ДИАЛОГ <<<
+        1. ВЪПРОСИ: Задавай САМО ПО ЕДИН въпрос на съобщение.
+        2. ЛИМИТ: Имаш право на МАКСИМУМ 3 въпроса общо. Ти си на въпрос номер ${questionCount + 1}.
+        3. ФИНАЛИЗИРАНЕ: Ако имаш достатъчно инфо ИЛИ ако вече си задал 3 въпроса, СТОП С ВЪПРОСИТЕ и върни JSON.
         
-        >>> ПРАВИЛА ЗА ОБЯВАТА <<<
-        - ПЕРСПЕКТИВА: Пиши от името на клиента (1-во лице). Напр. "Търся...", "Трябва ми...".
-        - СТИЛ: Професионален, с ясни параметри и детайли от снимката.
-        - БЕЗ ПРАЗНИ ПРИКАЗКИ: Никакви любезности и обяснения. Само въпрос или JSON.
+        >>> СТИЛ <<<
+        - Пиши от името на клиента (1-во лице).
+        - Без любезности. Само въпрос или JSON.
         
         >>> ФОРМАТ JSON <<<
-        {"title": "Заглавие на задачата", "description": "Професионално описание", "category": "Категория"}
+        {"title": "...", "description": "...", "category": "..."}
     `;
 
     const contents: any[] = history.map((h, i) => ({
@@ -93,37 +93,34 @@ export const sendMessageToGemini = async (
       contents: contents,
     });
 
-    const text = response.text;
+    const text = response.text || "";
     let analysis: AIAnalysisResult | undefined;
+    
     const jsonMatch = text.match(/\{[\s\S]*\}/);
     
-    // Logic: Force JSON if we have history or if it's the second user interaction
-    if (jsonMatch && contents.length > 1) {
+    // Force finalization if limit reached or JSON present
+    if (jsonMatch && (questionCount >= 1 || text.includes('category'))) {
       try {
         analysis = JSON.parse(jsonMatch[0]);
       } catch (e) {}
     }
 
-    let cleanText = text.replace(/```json[\s\S]*?```/g, "").replace(/\{[\s\S]*\}/g, "").trim();
-    
-    // If we have history but no JSON, or if it's taking too long, force finalize
-    if (contents.length > 2 && !analysis) {
+    // Auto-finalize if we hit 3 questions regardless of AI output
+    if (questionCount >= 3 && !analysis) {
        const mainTask = history[0]?.text || message;
-       return { 
-         text: "", 
-         analysis: { 
+       analysis = { 
            title: mainTask.substring(0, 50), 
            description: `Търся услуга за: ${mainTask}\nДетайли: ${message}`, 
            category: "Други" 
-         } 
        };
     }
 
+    let cleanText = text.replace(/```json[\s\S]*?```/g, "").replace(/\{[\s\S]*\}/g, "").trim();
     if (analysis) return { text: "", analysis };
-    return { text: cleanText || "Моля, дайте малко повече информация.", analysis };
+    return { text: cleanText || "Моля, отговорете на въпроса.", analysis };
   } catch (error: any) {
     console.error("Gemini Error:", error?.message || String(error));
-    return { text: "", error: `Грешка от Google: ${error?.message || "Неуспешен анализ"}` };
+    return { text: "", error: `Грешка при анализа: ${error?.message || "Опитайте отново"}` };
   }
 };
 
@@ -133,24 +130,24 @@ export const getOfferHelpQuestion = async (taskTitle: string, taskDesc: string):
   try {
     const response = await ai.models.generateContent({
       model: 'gemini-2.5-flash',
-      contents: `Задай кратък въпрос към майстора за задача: "${taskTitle}".`,
+      contents: `Задай въпрос за задача: "${taskTitle}".`,
     });
     return response.text.trim();
   } catch (error) {
-    return "Имате ли професионален опит?";
+    return "Имате ли опит?";
   }
 };
 
 export const generateOfferPitch = async (taskTitle: string, providerAnswer: string): Promise<string> => {
   const ai = getAI();
-  if (!ai) return `Разполагам с нужния опит: ${providerAnswer}.`;
+  if (!ai) return `Имам опит: ${providerAnswer}.`;
   try {
     const response = await ai.models.generateContent({
       model: 'gemini-2.5-flash',
-      contents: `Напиши кратка оферта от 1-во лице за задача: "${taskTitle}". Отговор на майстора: "${providerAnswer}". Без поздрави.`,
+      contents: `Напиши оферта за: "${taskTitle}". Отговор: "${providerAnswer}".`,
     });
     return response.text.trim();
   } catch (error) {
-    return `Разполагам с нужния опит: ${providerAnswer}.`;
+    return `Имам опит: ${providerAnswer}.`;
   }
 };
