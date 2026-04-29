@@ -55,24 +55,15 @@ export const sendMessageToGemini = async (
   
   try {
     const systemPrompt = `
-        ТИ СИ ЕКСПЕРТЕН АСИСТЕНТ (NEEDO AI). ТВОЯТА ЕДИНСТВЕНА ЦЕЛ Е ДА ГЕНЕРИРАШ JSON ОБЯВА.
+        ТИ СИ ЕКСПЕРТЕН АСИСТЕНТ (NEEDO AI). ТВОЯТА ЦЕЛ Е ДА ГЕНЕРИРАШ ОБЯВА В JSON ФОРМАТ.
         
-        >>> ПРАВИЛА ЗА ПОВЕДЕНИЕ (КРИТИЧНО) <<<
-        1. БЕЗ ЛЮБЕЗНОСТИ: Не казвай "Благодаря", "Разбирам", "Чудесно".
-        2. БЕЗ ОБЯСНЕНИЯ: Не обяснявай защо питаш и не коментирай отговорите на потребителя.
-        3. БЕЗ ЛЕКЦИИ: Не давай съвети за ремонт или безопасност.
-        4. МАШИНЕН ТОН: Отговаряй САМО с въпрос ИЛИ с JSON. 
-        
-        >>> ПРОЦЕС <<<
-        - Ако имаш достатъчно инфо: ВЪРНИ САМО JSON. 
-        - Ако трябва да питаш: ЗАДАЙ САМО ВЪПРОСА (без никакъв друг текст).
-        
-        >>> ФОРМАТ НА ОБЯВАТА <<<
-        - ПЕРСПЕКТИВА: 1-во лице ("Търся...", "Трябва ми...").
-        - ОПИСАНИЕ: Професионален списък с детайли.
-        - JSON: {"title": "...", "description": "...", "category": "..."}
-        
-        НИКОГА не питай за локация или време.
+        ПРАВИЛА:
+        1. Ако имаш достатъчно информация за обявата (заглавие, категория и детайлно описание), ТРЯБВА да върнеш JSON обект.
+        2. JSON обектът ТРЯБВА да е в този формат: {"title": "...", "description": "...", "category": "..."}.
+        3. Ако ти липсва важна информация за майстора, задай ЕДИН КРАТЪК ВЪПРОС.
+        4. ВИНАГИ пиши описанието в 1-во лице ("Търся...", "Трябва ми...").
+        5. НИКОГА не пожелавай приятен ден и не води странични разговори. 
+        6. Ако потребителят ти даде отговор на въпрос, НЕ коментирай отговора, а веднага генерирай крайния JSON.
     `;
 
     const contents: any[] = history.map(h => ({
@@ -99,24 +90,46 @@ export const sendMessageToGemini = async (
     const response = await ai.models.generateContent({
       model: 'gemini-2.5-flash',
       contents: contents,
+      // Attempt to use system prompt parameter if supported in 2026, 
+      // but keeping it in the first message is safer for backward compatibility.
     });
 
     const text = response.text;
     
+    // Improved JSON detection
     let analysis: AIAnalysisResult | undefined;
     const jsonMatch = text.match(/\{[\s\S]*\}/);
     if (jsonMatch) {
       try {
-        analysis = JSON.parse(jsonMatch[0]);
+        const parsed = JSON.parse(jsonMatch[0]);
+        // Validate JSON fields
+        if (parsed.title && parsed.description) {
+          analysis = parsed;
+        }
       } catch (e) {}
     }
 
     let cleanText = text.replace(/```json[\s\S]*?```/g, "").replace(/\{[\s\S]*\}/g, "").trim();
     
-    // Safety: if the AI still talks too much, cut it
-    if (analysis) cleanText = ""; 
+    // If we have analysis, we should transition. Ensure text is empty so UI knows it's an analysis.
+    if (analysis) {
+      return { text: "", analysis };
+    }
 
-    return { text: cleanText || (analysis ? "" : text), analysis };
+    // If AI failed to provide JSON but provided text, check if it's a "closing" text without JSON
+    if (cleanText.length < 50 && (cleanText.toLowerCase().includes("ден") || cleanText.toLowerCase().includes("късмет"))) {
+       // Forced JSON fallback if AI is being lazy
+       return { 
+         text: "", 
+         analysis: { 
+           title: message.substring(0, 50), 
+           description: message, 
+           category: "Други" 
+         } 
+       };
+    }
+
+    return { text: cleanText || "Моля, дайте повече подробности за задачата.", analysis };
   } catch (error: any) {
     console.error("Gemini Error:", error?.message || String(error));
     return { text: "", error: `Грешка от Google: ${error?.message || "Неуспешен анализ"}` };
