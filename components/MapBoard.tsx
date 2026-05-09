@@ -229,7 +229,7 @@ export const MapBoard: React.FC<MapBoardProps> = ({ tasks, onTaskClick, center, 
 
                 {internalZoom >= ZOOM_THRESHOLD && renderableTasks.map(task => {
                     const isSelected = selectedTask?.id === task.id;
-                    const hasOffers = task.offers && task.offers.length > 0;
+                    const hasOffers = (task.offersCount || 0) > 0 || (task.offers && task.offers.length > 0);
                     const isViewed = viewedTaskIds.has(task.id);
                     const showNewBadge = !hasOffers && !isViewed;
 
@@ -285,7 +285,7 @@ export const MapBoard: React.FC<MapBoardProps> = ({ tasks, onTaskClick, center, 
                                         <div className="absolute top-1 right-1 z-40">
                                             <div className={`h-6 min-w-[24px] px-2 rounded-full border border-white/40 shadow-2xl flex items-center justify-center ${hasOffers ? 'bg-amber-600' : 'bg-blue-700'}`}>
                                                 <span className="text-[10px] font-black text-white leading-none">
-                                                    {hasOffers ? task.offers.length : 'NEW'}
+                                                    {hasOffers ? (task.offersCount || task.offers.length) : 'NEW'}
                                                 </span>
                                             </div>
                                         </div>

@@ -88,11 +88,11 @@ export const AuthModal: React.FC<AuthModalProps> = ({ isOpen, onClose, onLoginSu
     setIsLoading(true);
     try {
       const user = await loginWithGoogle();
-      if (!user.phoneNumber) {
+      if (user && !user.phoneNumber) {
           setPendingGoogleUser(user);
           setMode('PHONE_REQUIRED');
           setIsLoading(false);
-      } else {
+      } else if (user) {
           onLoginSuccess(user);
           setIsLoading(false);
       }
@@ -116,15 +116,15 @@ export const AuthModal: React.FC<AuthModalProps> = ({ isOpen, onClose, onLoginSu
       <div className="relative w-full h-[100dvh] md:h-auto md:max-w-[900px] md:max-h-[90vh] bg-white md:rounded-[32px] shadow-2xl flex flex-col md:flex-row overflow-hidden animate-in zoom-in-95 duration-300 ring-1 ring-white/10 z-10">
         
         {/* Left Side - Artistic / Branding */}
-        <div className="hidden md:flex w-5/12 bg-[#0F172A] relative flex-col justify-between p-10 overflow-hidden">
+        <div className="hidden md:flex w-5/12 bg-gradient-to-br from-slate-900 via-indigo-950 to-slate-950 relative flex-col justify-between p-10 overflow-hidden">
             {/* Background Effects */}
             <div className="absolute top-[-20%] left-[-20%] w-[300px] h-[300px] bg-blue-500/20 rounded-full blur-[80px]"></div>
             <div className="absolute bottom-[-10%] right-[-10%] w-[250px] h-[250px] bg-indigo-500/20 rounded-full blur-[80px]"></div>
             <div className="absolute inset-0 bg-[url('https://www.transparenttextures.com/patterns/stardust.png')] opacity-10"></div>
             
             <div className="relative z-10">
-                <div className="w-12 h-12 bg-gradient-to-br from-blue-600 to-indigo-600 rounded-xl flex items-center justify-center mb-6 shadow-lg shadow-blue-900/50">
-                    <span className="font-black text-2xl text-white">N</span>
+                <div className="w-14 h-14 bg-white/10 backdrop-blur-xl rounded-2xl flex items-center justify-center mb-8 shadow-2xl border border-white/20 p-2 group hover:scale-110 transition-transform duration-500 overflow-hidden">
+                    <img src="logo.jpg" alt="Logo" className="w-full h-full object-cover rounded-lg" />
                 </div>
                 <h2 className="text-3xl font-black text-white mb-3 tracking-tight leading-tight">
                     {mode === 'LOGIN' ? 'Добре дошли отново.' : 'Започнете своето пътешествие.'}
@@ -195,19 +195,19 @@ export const AuthModal: React.FC<AuthModalProps> = ({ isOpen, onClose, onLoginSu
         </div>
 
         {/* Right Side - Form (Scroll Container) */}
-        <div className="flex-1 bg-white relative h-full overflow-y-auto scrollbar-hide">
+        <div className="flex-1 bg-white relative overflow-y-auto min-h-0 overscroll-contain" style={{ WebkitOverflowScrolling: 'touch' }}>
             
-            {/* Mobile Header Image - Keeps stickyness or normal flow depending on design preference. Here normal flow. */}
-            <div className="md:hidden h-40 bg-[#0F172A] relative flex items-end p-6 shrink-0 overflow-hidden min-h-[160px]">
-                <div className="absolute top-[-20%] right-[-10%] w-40 h-40 bg-blue-500/20 rounded-full blur-[50px]"></div>
+            {/* Mobile Header Image */}
+            <div className="md:hidden h-40 bg-gradient-to-br from-slate-900 to-indigo-950 relative flex items-end p-6 shrink-0 overflow-hidden min-h-[160px]">
+                <div className="absolute top-[-20%] right-[-10%] w-40 h-40 bg-blue-500/30 rounded-full blur-[50px]"></div>
                 <div className="absolute top-4 left-4">
-                    <div className="w-10 h-10 bg-white/10 backdrop-blur-md rounded-xl flex items-center justify-center border border-white/10">
-                        <span className="font-black text-xl text-white">N</span>
+                    <div className="w-10 h-10 bg-white/20 backdrop-blur-xl rounded-xl flex items-center justify-center border border-white/20 p-1.5 overflow-hidden">
+                        <img src="logo.jpg" alt="Logo" className="w-full h-full object-cover rounded-md" />
                     </div>
                 </div>
                 <div className="relative z-10">
-                    <h2 className="text-2xl font-black text-white tracking-tight">Needo</h2>
-                    <p className="text-xs font-bold text-slate-400 uppercase tracking-widest">Service Platform</p>
+                    <h2 className="text-2xl font-black text-white tracking-tight">needo<span className="text-blue-400">.</span></h2>
+                    <p className="text-[10px] font-black text-slate-400 uppercase tracking-[0.2em] opacity-80">Premium Services</p>
                 </div>
                 {!isPhoneReq && (
                     <button 
@@ -230,7 +230,7 @@ export const AuthModal: React.FC<AuthModalProps> = ({ isOpen, onClose, onLoginSu
 
             {/* Layout Wrapper */}
             {/* Mobile: Standard Block Flow (p-6). Desktop: Flex Center (md:flex-col md:justify-center md:min-h-full). */}
-            <div className="p-6 md:p-12 pb-32 w-full md:min-h-full md:flex md:flex-col md:justify-center">
+            <div className="p-6 pb-40 md:p-12 md:pb-32 w-full md:min-h-full md:flex md:flex-col md:justify-center">
                 <div className="w-full max-w-md mx-auto">
                     
                     <div className="mb-8 hidden md:block">
@@ -505,7 +505,7 @@ export const AuthModal: React.FC<AuthModalProps> = ({ isOpen, onClose, onLoginSu
                             className={`w-full py-4 rounded-xl font-black text-sm shadow-lg flex items-center justify-center gap-2 group mt-6 shrink-0 transition-all duration-300 transform active:scale-[0.98] ${
                                 (mode === 'REGISTER' && !agreedToTerms)
                                 ? 'bg-slate-200 text-slate-400 cursor-not-allowed shadow-none'
-                                : 'bg-slate-900 text-white hover:bg-slate-800 hover:shadow-xl'
+                                : 'bg-gradient-to-r from-slate-900 to-indigo-950 text-white hover:shadow-indigo-500/20 hover:shadow-xl'
                             }`}
                         >
                             {isLoading ? <Loader2 className="animate-spin" /> : (

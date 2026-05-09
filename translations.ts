@@ -217,7 +217,7 @@ export const translations = {
     pay_step_2: "Изпълнение",
     pay_step_3: "Освобождаване",
     commission_title: "Комисионна",
-    commission_desc: "Удържа се само от Изпълнителя.",
+    commission_desc: "Споделена комисионна (5% от Клиента и 5% от Изпълнителя).",
 
     // Offers List in Sidebar
     offer_time: "Време",

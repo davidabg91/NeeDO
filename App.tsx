@@ -14,7 +14,7 @@ import { LegalInfoModal } from './components/LegalInfoModal';
 import { WelcomeOnboardingModal } from './components/WelcomeOnboardingModal';
 import { Task, TaskStatus, AIAnalysisResult, Offer, Review, AppUser, Notification, TaskQuestion, Dispute } from './types';
 import { calculateDistance } from './utils/geo';
-import { getAllUsers, getUserById, logoutUser, syncUserProfile, getProvidersByCategory } from './services/authService';
+import { getAllUsers, getUserById, logoutUser, syncUserProfile, getProvidersByCategory, handleRedirectResult } from './services/authService';
 import {
     subscribeToTasks,
     createTask,
@@ -35,8 +35,9 @@ import {
     subscribeToTaskReviews
 } from './services/dataService';
 import { Search, ChevronDown, ChevronUp, WifiOff, Info, MapPin, Clock, TrendingUp, Filter, SortAsc, X, Users, Layers, Check, Loader2, ShieldCheck, Zap, Radio, Camera, Coins, Command, LayoutGrid, ChevronRight, Globe } from 'lucide-react';
-import { auth } from './firebase';
+import { auth, db } from './firebase';
 import { onAuthStateChanged } from 'firebase/auth';
+import { doc, onSnapshot } from 'firebase/firestore';
 import { CATEGORIES_LIST } from './constants';
 import { LanguageProvider, useLanguage } from './contexts/LanguageContext';
 import { LanguageSwitcher } from './components/LanguageSwitcher';
@@ -165,6 +166,27 @@ const AppContent: React.FC = () => {
             }
         }
     }, [tasks]); // Run when tasks load
+    
+    // Handle Stripe Onboarding Return
+    useEffect(() => {
+        const params = new URLSearchParams(window.location.search);
+        if (params.get('stripe_return') === 'true' && currentUser) {
+            const checkStatus = async () => {
+                try {
+                    const result = await stripeService.checkStripeStatus(currentUser.id);
+                    if (result.onboardingComplete) {
+                        // Update local user state immediately
+                        setCurrentUser(prev => prev ? { ...prev, stripeOnboardingComplete: true } : null);
+                        // Clean URL
+                        window.history.replaceState({}, '', window.location.pathname);
+                    }
+                } catch (e) {
+                    console.error("Stripe return check failed", e);
+                }
+            };
+            checkStatus();
+        }
+    }, [currentUser]);
 
     // --- HISTORY HANDLING LOGIC ---
     // Push state when opening a modal/view
@@ -217,11 +239,31 @@ const AppContent: React.FC = () => {
 
 
     useEffect(() => {
-        const unsubscribe = onAuthStateChanged(auth, async (firebaseUser) => {
+        let unsubscribeUserDoc: (() => void) | null = null;
+
+        const unsubscribeAuth = onAuthStateChanged(auth, async (firebaseUser) => {
+            // Cleanup previous user doc listener if any
+            if (unsubscribeUserDoc) {
+                unsubscribeUserDoc();
+                unsubscribeUserDoc = null;
+            }
+
             try {
                 if (firebaseUser) {
+                    // Initial sync
                     const userData = await syncUserProfile(firebaseUser);
                     setCurrentUser(userData);
+
+                    // --- NEW: Real-time listener for user profile changes ---
+                    const userRef = doc(db, "users", firebaseUser.uid);
+                    unsubscribeUserDoc = onSnapshot(userRef, (docSnap) => {
+                        if (docSnap.exists()) {
+                            const data = docSnap.data() as AppUser;
+                            // Fix legacy rating
+                            if (data.reviewCount === 0 && data.rating > 0) data.rating = 0;
+                            setCurrentUser(data);
+                        }
+                    });
                 } else {
                     setCurrentUser(null);
                 }
@@ -237,9 +279,25 @@ const AppContent: React.FC = () => {
         const timeout = setTimeout(() => setAuthLoading(false), 8000);
 
         return () => {
-            unsubscribe();
+            unsubscribeAuth();
+            if (unsubscribeUserDoc) unsubscribeUserDoc();
             clearTimeout(timeout);
         };
+    }, []);
+
+    // --- NEW: Handle Google Redirect Result (Fix for iOS/Mobile) ---
+    useEffect(() => {
+        const checkRedirect = async () => {
+            try {
+                const user = await handleRedirectResult();
+                if (user) {
+                    setCurrentUser(user);
+                }
+            } catch (e) {
+                console.error("Redirect check failed", e);
+            }
+        };
+        checkRedirect();
     }, []);
 
     useEffect(() => {
@@ -502,7 +560,8 @@ const AppContent: React.FC = () => {
             duration,
             comment: description,
             startDate: date,
-            createdAt: Date.now()
+            createdAt: Date.now(),
+            providerStripeVerified: currentUser.stripeOnboardingComplete || false
         };
 
         await addOfferToTask(taskId, newOffer);
@@ -521,31 +580,60 @@ const AppContent: React.FC = () => {
     };
 
     const handleAcceptOffer = async (taskId: string, offerId: string) => {
-        const task = tasks.find(t => t.id === taskId);
-        const offer = task?.offers.find(o => o.id === offerId);
-        if (!task || !offer) return;
+        // Optimization: First check if selectedTask is the one we need (it has full sub-collection sync)
+        let task = selectedTask && selectedTask.id === taskId ? selectedTask : tasks.find(t => t.id === taskId);
+        let offer = task?.offers?.find(o => o.id === offerId);
 
-        await updateTaskStatus(taskId, TaskStatus.AWAITING_PAYMENT, { acceptedOfferId: offerId });
+        // If not found in memory (rare), we can't proceed with notification metadata but we should try to update status anyway
+        // but for safety of current logic:
+        if (!task || !offer) {
+            alert("Грешка: Задачата или офертата не бяха намерени. Моля опреснете страницата.");
+            return;
+        }
 
-        await sendNotification({
-            userId: offer.providerId,
-            type: 'OFFER_ACCEPTED',
-            title: 'Офертата ви е приета!',
-            message: `${task.requesterName} избра вас за "${task.title}".`,
-            taskId: task.id,
-            isRead: false,
-            createdAt: Date.now()
-        });
+        // Warning for unverified provider
+        if (!offer.providerStripeVerified) {
+            const proceed = window.confirm("⚠️ Внимание: Този изпълнител все още не е свързал своя Stripe акаунт за получаване на плащания. Това може да забави превода на сумата в края на задачата. Желаете ли да продължите?");
+            if (!proceed) return;
+        }
+
+        try {
+            await updateTaskStatus(taskId, TaskStatus.AWAITING_PAYMENT, { 
+                acceptedOfferId: offerId,
+                acceptedProviderId: offer.providerId,
+                acceptedProviderName: offer.providerName,
+                acceptedProviderAvatar: offer.providerAvatar,
+                acceptedPrice: offer.price,
+                acceptedAt: Date.now()
+            });
+
+            await sendNotification({
+                userId: offer.providerId,
+                type: 'OFFER_ACCEPTED',
+                title: 'Офертата ви е приета!',
+                message: `${task.requesterName} избра вас за "${task.title}".`,
+                taskId: task.id,
+                isRead: false,
+                createdAt: Date.now()
+            });
+        } catch (error) {
+            console.error("Accept offer failed", error);
+            alert("Неуспешно приемане на офертата. Моля опитайте пак.");
+        }
     };
 
     const handleFundEscrow = async (taskId: string) => {
-        const task = tasks.find(t => t.id === taskId);
+        let task = selectedTask && selectedTask.id === taskId ? selectedTask : tasks.find(t => t.id === taskId);
         if (!task) return;
-        const offer = task.offers.find(o => o.id === task.acceptedOfferId);
-        if (!offer) return;
+
+        const offer = task.offers?.find(o => o.id === task.acceptedOfferId);
+        if (!offer) {
+            alert("Грешка: Не намерихме детайлите на офертата. Моля опреснете страницата.");
+            return;
+        }
 
         setPendingPaymentTaskId(taskId);
-        const totalToPay = offer.price * 1.03; // Agreed price + 3% client fee
+        const totalToPay = offer.price * 1.05; // Agreed price + 5% client fee
         setPaymentAmount(totalToPay);
         setIsPaymentModalOpen(true);
         setStripeClientSecret(null);
@@ -564,8 +652,8 @@ const AppContent: React.FC = () => {
     const handlePaymentSuccess = async () => {
         if (!pendingPaymentTaskId) return;
         const taskId = pendingPaymentTaskId;
-        const task = tasks.find(t => t.id === taskId);
-        const offer = task?.offers.find(o => o.id === task?.acceptedOfferId);
+        let task = selectedTask && selectedTask.id === taskId ? selectedTask : tasks.find(t => t.id === taskId);
+        const offer = task?.offers?.find(o => o.id === task?.acceptedOfferId);
         
         setIsPaymentModalOpen(false);
         setPendingPaymentTaskId(null);
@@ -591,7 +679,7 @@ const AppContent: React.FC = () => {
 
     const handleProviderSubmitWork = async (taskId: string, completionImage: string, requesterRating: number, requesterReview: string) => {
         if (!currentUser) return;
-        const task = tasks.find(t => t.id === taskId);
+        let task = selectedTask && selectedTask.id === taskId ? selectedTask : tasks.find(t => t.id === taskId);
         if (!task) return;
 
         const newReview: Review = {
@@ -622,10 +710,14 @@ const AppContent: React.FC = () => {
 
     const handleRequesterApproveWork = async (taskId: string, providerRating: number, providerReview: string, completionImage?: string) => {
         if (!currentUser) return;
-        const task = tasks.find(t => t.id === taskId);
+        let task = selectedTask && selectedTask.id === taskId ? selectedTask : tasks.find(t => t.id === taskId);
         if (!task) return;
-        const offer = task.offers.find(o => o.id === task.acceptedOfferId);
-        if (!offer) return;
+
+        const offer = task.offers?.find(o => o.id === task.acceptedOfferId);
+        if (!offer) {
+            alert("Грешка: Не намерихме детайлите на офертата. Моля опреснете страницата.");
+            return;
+        }
 
         const newReview: Review = {
             id: (Date.now() + 1).toString(),
@@ -643,20 +735,28 @@ const AppContent: React.FC = () => {
             try {
                 const providerUser = await getUserById(offer.providerId);
                 const providerAccountId = providerUser?.stripeAccountId;
+                
                 if (providerAccountId) {
-                    // Total Paid was 103% of price. 
-                    // Platform Fee is 6% of base price.
-                    // Provider gets 97% of base price.
-                    // We tell the service to release the escrow based on the base offer price.
-                    await stripeService.releaseEscrow(task.paymentIntentId, providerAccountId, offer.price);
+                    try {
+                        await stripeService.releaseEscrow(task.paymentIntentId, providerAccountId, offer.price);
+                    } catch (paymentError: any) {
+                        const errorMsg = paymentError.message || "";
+                        if (errorMsg.includes("capabilities") || errorMsg.includes("transfers")) {
+                            alert("⚠️ Неуспешен превод: Изпълнителят все още не е завършил своята Stripe регистрация или акаунтът му не е напълно активиран. Моля, уведомете изпълнителя да провери своя профил и да завърши настройките в Stripe, за да може да получи сумата.");
+                        } else {
+                            alert(`Грешка при освобождаване на плащането: ${errorMsg || 'Моля опитайте пак.'}`);
+                        }
+                        return; // stop execution if payment fails
+                    }
                 } else {
                     console.error("Provider has no Stripe account linked to receive funds.");
-                    alert("Внимание: Изпълнителят няма свързан Stripe акаунт за получаване на превода. Моля свържете се с поддръжката.");
+                    alert("❌ Внимание: Изпълнителят няма свързан Stripe акаунт за получаване на превода. Моля свържете се с него чрез чата и го помолете да свърже акаунта си в своя профил.");
+                    return;
                 }
-            } catch (error) {
-                console.error("Failed to release escrow via Stripe", error);
-                alert("Грешка при освобождаване на плащането. Моля опитайте пак.");
-                return; // stop execution if payment fails
+            } catch (error: any) {
+                console.error("Failed to fetch provider status", error);
+                alert("Възникна грешка при проверка на статуса на изпълнителя.");
+                return;
             }
         }
 
@@ -790,11 +890,26 @@ const AppContent: React.FC = () => {
         }
     };
 
+    const handleTaskClick = (task: Task) => {
+        setSelectedTask(prev => {
+            if (prev && prev.id === task.id) {
+                // Merge to preserve sub-collection data already loaded
+                return { 
+                    ...task, 
+                    offers: prev.offers, 
+                    questions: prev.questions, 
+                    reviews: prev.reviews 
+                };
+            }
+            return task;
+        });
+    };
+
     const handleNotificationClick = async (notif: Notification) => {
         await markNotificationRead(notif.id);
         if (notif.taskId) {
             const task = tasks.find(t => t.id === notif.taskId);
-            if (task) setSelectedTask(task);
+            if (task) handleTaskClick(task);
         }
     };
 
@@ -940,7 +1055,8 @@ const AppContent: React.FC = () => {
                 </>
             )}
 
-            <div className={`absolute top-0 left-0 w-full z-30 p-4 pointer-events-none pt-safe-top ${isDemoMode && !currentUser ? 'mt-6' : ''}`}>
+            {viewMode !== 'NOTIFICATIONS' && (
+                <div className={`absolute top-0 left-0 w-full z-30 p-4 pointer-events-none pt-safe-top ${isDemoMode && !currentUser ? 'mt-6' : ''}`}>
                 <div className="flex flex-col items-center pointer-events-auto">
 
                     <div
@@ -962,6 +1078,7 @@ const AppContent: React.FC = () => {
                     {viewMode === 'MAP' && <LiveStatusTicker />}
                 </div>
             </div>
+            )}
 
             {/* FIXED LANGUAGE SWITCHER FOR LIST VIEW - MOVED HERE FOR CLICKABILITY */}
             {viewMode === 'LIST' && (
@@ -976,7 +1093,7 @@ const AppContent: React.FC = () => {
                 <div className={`absolute inset-0 transition-opacity duration-500 ${viewMode === 'MAP' ? 'opacity-100 z-10' : 'opacity-0 z-0'}`}>
                     <MapBoard
                         tasks={mapFilteredTasks}
-                        onTaskClick={setSelectedTask}
+                        onTaskClick={handleTaskClick}
                         center={mapCenter}
                         onLocateMe={handleLocateMe}
                         userLocation={userLocation}
@@ -1186,8 +1303,8 @@ const AppContent: React.FC = () => {
                                                 <TaskCard
                                                     task={task}
                                                     distanceKm={userLocation ? calculateDistance(userLocation[0], userLocation[1], task.location.lat, task.location.lng) : null}
-                                                    onClick={() => setSelectedTask(task)}
-                                                    onOfferClick={(e) => { e.stopPropagation(); setSelectedTask(task); }}
+                                                    onClick={() => handleTaskClick(task)}
+                                                    onOfferClick={(e) => { e.stopPropagation(); handleTaskClick(task); }}
                                                 />
                                             </div>
                                         ))
@@ -1207,7 +1324,7 @@ const AppContent: React.FC = () => {
                 )}
 
                 {viewMode === 'NOTIFICATIONS' && (
-                    <div className="absolute inset-0 z-20 bg-slate-50">
+                    <div className="absolute inset-0 z-20 bg-gradient-to-br from-slate-50 via-white to-indigo-50/30 overflow-hidden">
                         <NotificationsView
                             notifications={userNotifications}
                             tasks={tasks}
@@ -1215,7 +1332,7 @@ const AppContent: React.FC = () => {
                             onNotificationClick={handleNotificationClick}
                             onMarkAllRead={() => currentUser && markAllNotificationsRead(currentUser.id)}
                             onChatOpen={setIsDirectMessageOpen}
-                            onTaskClick={setSelectedTask}
+                            onTaskClick={handleTaskClick}
                             initialChatTask={targetChatTask}
                             onClearInitialChat={() => setTargetChatTask(null)}
                             isChatActiveExternal={isDirectMessageOpen}
@@ -1321,7 +1438,7 @@ const AppContent: React.FC = () => {
                     }}
                     isCurrentUserProfile={currentUser?.id === viewingProfileUser.id}
                     onTaskClick={(task) => {
-                        setSelectedTask(task);
+                        handleTaskClick(task);
                         setViewingProfileUser(null);
                     }}
                     onUserUpdate={(updatedData) => {

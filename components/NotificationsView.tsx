@@ -1,7 +1,7 @@
 
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { Notification, Task, AppUser, DirectMessage, TaskStatus } from '../types';
-import { Bell, CheckCircle, DollarSign, Briefcase, Info, Clock, MessageCircle, Send, ChevronLeft, User as UserIcon, ExternalLink, Loader2, ArrowUpCircle } from 'lucide-react';
+import { Bell, CheckCircle, DollarSign, Briefcase, Info, Clock, MessageCircle, Send, ChevronLeft, User as UserIcon, ExternalLink, Loader2, ArrowUpCircle, Zap } from 'lucide-react';
 import { subscribeToDirectMessages, sendDirectMessage, markNotificationRead, fetchOlderMessages } from '../services/dataService';
 import { useLanguage } from '../contexts/LanguageContext';
 
@@ -91,21 +91,27 @@ export const NotificationsView: React.FC<NotificationsViewProps> = ({
   return (
     // Replaced absolute inset-0 with fixed for mobile to allow natural document scroll if needed
     // md:absolute keeps desktop layout constrained to the app container
-    <div className="fixed inset-0 z-30 bg-slate-50 flex flex-col md:absolute md:inset-0">
+    <div className="fixed inset-0 z-30 bg-indigo-50/50 flex flex-col md:absolute md:inset-0">
       
       {/* Scroll Container */}
-      {/* Mobile: overflow-y-auto allows whole page scroll. Desktop: overflow-hidden to keep it app-like */}
       <div className="w-full h-full overflow-y-auto md:overflow-hidden flex flex-col pt-safe-top">
         
-        <div className="max-w-2xl mx-auto w-full flex-1 flex flex-col px-4 pt-24 pb-32 md:pt-12 md:pb-4 md:h-full">
+        <div className="max-w-2xl mx-auto w-full flex-1 flex flex-col px-4 pt-20 pb-32 md:pt-12 md:pb-4 md:h-full">
             
-            {/* Header with Tabs */}
-            <div className="flex justify-between items-center mb-6 shrink-0">
-              <h2 className="text-3xl font-bold text-slate-900">{t('center_title')}</h2>
+            {/* Header - BEAUTIFIED & CENTERED */}
+            <div className="flex flex-col items-center mb-10 shrink-0 text-center">
+              <div className="inline-flex items-center justify-center w-14 h-14 bg-indigo-600 rounded-[22px] text-white shadow-xl shadow-indigo-200 mb-4 transform -rotate-3">
+                 <Bell size={28} className="animate-pulse" />
+              </div>
+              <h2 className="text-4xl font-black text-slate-900 tracking-tight leading-none mb-2">
+                Вашия <span className="text-indigo-600">център</span>
+              </h2>
+              <p className="text-[10px] font-bold text-slate-400 uppercase tracking-[0.2em]">Управление на известия и съобщения</p>
+              
               {activeTab === 'NOTIFICATIONS' && unreadGeneralCount > 0 && (
                  <button 
                     onClick={onMarkAllRead}
-                    className="text-xs text-blue-600 font-bold hover:text-blue-700 bg-blue-50 px-3 py-1.5 rounded-full"
+                    className="mt-4 text-[10px] text-indigo-600 font-black uppercase tracking-wider hover:text-indigo-700 bg-white/80 backdrop-blur-md px-4 py-2 rounded-xl border border-indigo-100 shadow-sm transition-all active:scale-95"
                  >
                    {t('center_clear')}
                  </button>
@@ -171,75 +177,73 @@ const NotificationList = ({ notifications, onClick }: { notifications: Notificat
     const { t } = useLanguage();
     if (notifications.length === 0) {
         return (
-          <div className="flex flex-col items-center justify-center py-20 text-center opacity-60">
-            <div className="w-16 h-16 bg-slate-100 rounded-full flex items-center justify-center mb-3">
-              <Bell size={32} className="text-slate-300" />
+          <div className="flex flex-col items-center justify-center py-24 text-center">
+            <div className="w-20 h-20 bg-slate-100 rounded-[32px] flex items-center justify-center mb-4 rotate-6 border border-slate-200">
+              <Bell size={36} className="text-slate-300" />
             </div>
-            <p className="text-sm font-bold text-slate-400">{t('center_empty_notifs')}</p>
+            <p className="text-sm font-bold text-slate-400 max-w-[200px] leading-relaxed">{t('center_empty_notifs')}</p>
           </div>
         );
     }
 
-    const getIcon = (type: Notification['type']) => {
+    const getStyles = (type: Notification['type']) => {
         switch (type) {
-          case 'OFFER_RECEIVED': return <Briefcase size={20} className="text-blue-500" />;
-          case 'OFFER_ACCEPTED': return <CheckCircle size={20} className="text-green-500" />;
-          case 'TASK_COMPLETED': return <CheckCircle size={20} className="text-purple-500" />;
-          case 'PAYMENT_RELEASED': return <DollarSign size={20} className="text-yellow-500" />;
-          case 'NEW_MESSAGE': return <MessageCircle size={20} className="text-indigo-500" />; // Should ideally be filtered out
-          default: return <Info size={20} className="text-gray-500" />;
-        }
-    };
-
-    const getBgColor = (type: Notification['type']) => {
-        switch (type) {
-          case 'OFFER_RECEIVED': return 'bg-blue-100';
-          case 'OFFER_ACCEPTED': return 'bg-green-100';
-          case 'TASK_COMPLETED': return 'bg-purple-100';
-          case 'PAYMENT_RELEASED': return 'bg-yellow-100';
-          case 'NEW_MESSAGE': return 'bg-indigo-100';
-          default: return 'bg-gray-100';
+          case 'OFFER_RECEIVED': 
+            return { icon: <Briefcase size={22} />, bg: 'bg-blue-100', text: 'text-blue-600', border: 'border-blue-200', dot: 'bg-blue-500' };
+          case 'OFFER_ACCEPTED': 
+            return { icon: <CheckCircle size={22} />, bg: 'bg-emerald-100', text: 'text-emerald-600', border: 'border-emerald-200', dot: 'bg-emerald-500' };
+          case 'TASK_COMPLETED': 
+            return { icon: <Zap size={22} />, bg: 'bg-indigo-100', text: 'text-indigo-600', border: 'border-indigo-200', dot: 'bg-indigo-500' };
+          case 'PAYMENT_RELEASED': 
+            return { icon: <DollarSign size={22} />, bg: 'bg-amber-100', text: 'text-amber-600', border: 'border-amber-200', dot: 'bg-amber-500' };
+          case 'NEW_MESSAGE': 
+            return { icon: <MessageCircle size={22} />, bg: 'bg-cyan-100', text: 'text-cyan-600', border: 'border-cyan-200', dot: 'bg-cyan-500' };
+          default: 
+            return { icon: <Info size={22} />, bg: 'bg-slate-100', text: 'text-slate-600', border: 'border-slate-200', dot: 'bg-slate-500' };
         }
     };
 
     return (
-        <div className="space-y-3">
-          {notifications.map(notification => (
-            <div 
-              key={notification.id}
-              onClick={() => onClick(notification)}
-              className={`relative p-4 rounded-2xl border transition-all cursor-pointer hover:shadow-md ${
-                notification.isRead 
-                  ? 'bg-white border-gray-100' 
-                  : 'bg-blue-50/50 border-blue-100 shadow-sm'
-              }`}
-            >
-              <div className="flex gap-4">
-                <div className={`w-12 h-12 rounded-full flex items-center justify-center shrink-0 ${getBgColor(notification.type)}`}>
-                  {getIcon(notification.type)}
-                </div>
-                
-                <div className="flex-1 min-w-0">
-                  <div className="flex justify-between items-start mb-1">
-                    <h4 className={`font-bold truncate pr-2 text-sm ${notification.isRead ? 'text-slate-800' : 'text-blue-900'}`}>
-                      {notification.title}
-                    </h4>
-                    <span className="text-[10px] text-gray-400 whitespace-nowrap flex items-center gap-1">
-                      <Clock size={10} />
-                      {getTimeAgo(notification.createdAt)}
-                    </span>
+        <div className="space-y-4 px-1 pb-10">
+          {notifications.map(notification => {
+            const styles = getStyles(notification.type);
+            return (
+                <div 
+                  key={notification.id}
+                  onClick={() => onClick(notification)}
+                  className={`group relative p-4 rounded-[24px] border transition-all duration-300 cursor-pointer hover:shadow-lg active:scale-95 ${
+                    notification.isRead 
+                      ? 'bg-white border-slate-100 opacity-90' 
+                      : `${styles.bg} ${styles.border} shadow-[0_12px_24px_-10px_rgba(0,0,0,0.12)] ring-2 ring-white/80`
+                  }`}
+                >
+                  <div className="flex gap-4 items-center">
+                    <div className={`w-14 h-14 rounded-2xl flex items-center justify-center shrink-0 shadow-sm transition-transform group-hover:rotate-6 ${styles.bg} ${styles.text} border-2 border-white`}>
+                      {styles.icon}
+                    </div>
+                    
+                    <div className="flex-1 min-w-0">
+                      <div className="flex justify-between items-start mb-0.5">
+                        <h4 className={`font-black tracking-tight truncate pr-2 text-[13px] uppercase ${notification.isRead ? 'text-slate-700' : styles.text}`}>
+                          {notification.title}
+                        </h4>
+                        <span className="text-[9px] font-bold text-slate-400 whitespace-nowrap flex items-center gap-1 bg-slate-50 px-2 py-1 rounded-full border border-slate-100">
+                          <Clock size={10} />
+                          {getTimeAgo(notification.createdAt)}
+                        </span>
+                      </div>
+                      <p className={`text-xs leading-relaxed line-clamp-2 ${notification.isRead ? 'text-slate-500' : 'text-slate-800 font-bold'}`}>
+                        {notification.message}
+                      </p>
+                    </div>
                   </div>
-                  <p className={`text-xs line-clamp-2 ${notification.isRead ? 'text-gray-600' : 'text-slate-700 font-medium'}`}>
-                    {notification.message}
-                  </p>
+                  
+                  {!notification.isRead && (
+                    <div className={`absolute -top-1 -right-1 w-4 h-4 ${styles.dot} rounded-full border-4 border-white shadow-sm animate-pulse`} />
+                  )}
                 </div>
-              </div>
-              
-              {!notification.isRead && (
-                <div className="absolute top-4 right-4 w-2 h-2 bg-blue-500 rounded-full" />
-              )}
-            </div>
-          ))}
+            );
+          })}
         </div>
     );
 };
@@ -253,7 +257,12 @@ const ChatList = ({ tasks, currentUser, notifications, onSelectTask }: { tasks: 
     // Only show chats for tasks that are IN_PROGRESS, IN_REVIEW, DISPUTED, or CLOSED
     // And where user is either requester or accepted provider
     const chatTasks = tasks.filter(t => {
-        const isParticipant = (t.requesterId === currentUser.id) || (t.offers.find(o => o.id === t.acceptedOfferId)?.providerId === currentUser.id);
+        const isRequester = t.requesterId === currentUser.id;
+        // Robust check using the new acceptedProviderId field or the legacy offers check
+        const isAcceptedProvider = (t as any).acceptedProviderId === currentUser.id || 
+                                   t.offers.some(o => o.id === t.acceptedOfferId && o.providerId === currentUser.id);
+        
+        const isParticipant = isRequester || isAcceptedProvider;
         const isActiveState = [TaskStatus.AWAITING_PAYMENT, TaskStatus.IN_PROGRESS, TaskStatus.IN_REVIEW, TaskStatus.DISPUTED, TaskStatus.CLOSED].includes(t.status);
         return isParticipant && isActiveState;
     });
@@ -318,16 +327,20 @@ const ChatList = ({ tasks, currentUser, notifications, onSelectTask }: { tasks: 
         <div className="space-y-3">
             {sortedChatTasks.map(task => {
                 const isRequester = task.requesterId === currentUser.id;
-                const acceptedOffer = task.offers.find(o => o.id === task.acceptedOfferId);
-                const partnerName = isRequester ? acceptedOffer?.providerName : task.requesterName;
-                const partnerAvatar = isRequester ? acceptedOffer?.providerAvatar : task.requesterAvatar;
+                // Use saved provider details if available, otherwise try to find in offers (fallback)
+                const partnerName = isRequester 
+                    ? ((task as any).acceptedProviderName || task.offers.find(o => o.id === task.acceptedOfferId)?.providerName)
+                    : task.requesterName;
+                const partnerAvatar = isRequester 
+                    ? ((task as any).acceptedProviderAvatar || task.offers.find(o => o.id === task.acceptedOfferId)?.providerAvatar)
+                    : task.requesterAvatar;
 
                 // Check for unread messages specific to this task
                 const hasUnread = notifications.some(n => n.taskId === task.id && !n.isRead);
 
                 // Fallback avatar
                 const safeAvatar = (!partnerAvatar || partnerAvatar.includes('dicebear')) 
-                    ? "https://ui-avatars.com/api/?name=N&background=2563eb&color=fff&size=128&bold=true&length=1"
+                    ? "/logo.jpg"
                     : partnerAvatar;
 
                 const statusBadge = getStatusBadge(task.status);
@@ -446,15 +459,20 @@ const ChatWindow = ({ task, currentUser, onBack, onTaskClick }: { task: Task, cu
         return Array.from(map.values()).sort((a, b) => a.createdAt - b.createdAt);
     }, [historyMessages, liveMessages]);
 
-    const acceptedOffer = task.offers.find(o => o.id === task.acceptedOfferId);
     const isRequester = task.requesterId === currentUser.id;
-    const partnerName = isRequester ? acceptedOffer?.providerName : task.requesterName;
-    const partnerAvatar = isRequester ? acceptedOffer?.providerAvatar : task.requesterAvatar;
-    const partnerId = isRequester ? acceptedOffer?.providerId : task.requesterId;
+    const partnerName = isRequester 
+        ? ((task as any).acceptedProviderName || task.offers.find(o => o.id === task.acceptedOfferId)?.providerName)
+        : task.requesterName;
+    const partnerAvatar = isRequester 
+        ? ((task as any).acceptedProviderAvatar || task.offers.find(o => o.id === task.acceptedOfferId)?.providerAvatar)
+        : task.requesterAvatar;
+    const partnerId = isRequester 
+        ? ((task as any).acceptedProviderId || task.offers.find(o => o.id === task.acceptedOfferId)?.providerId)
+        : task.requesterId;
     
     // Fallback avatar
     const safeAvatar = (!partnerAvatar || partnerAvatar.includes('dicebear')) 
-        ? "https://ui-avatars.com/api/?name=N&background=2563eb&color=fff&size=128&bold=true&length=1"
+        ? "/logo.jpg"
         : partnerAvatar;
 
     const handleSend = async (e: React.FormEvent) => {
@@ -476,29 +494,39 @@ const ChatWindow = ({ task, currentUser, onBack, onTaskClick }: { task: Task, cu
     };
 
     return (
-        <div className="fixed inset-0 z-[60] bg-white flex flex-col h-[100dvh] pt-safe-top">
+        <div className="absolute inset-0 z-[60] bg-gradient-to-b from-blue-100 to-indigo-50 flex flex-col h-full pointer-events-auto">
             
-            {/* Chat Header */}
-            <div className="px-4 py-4 border-b border-slate-100 flex items-center gap-3 bg-white/80 backdrop-blur-md sticky top-0 z-40">
-                <button 
-                    onClick={onBack} 
-                    className="w-12 h-12 shrink-0 flex items-center justify-center bg-slate-100 hover:bg-slate-200 rounded-full text-slate-600 transition-all active:scale-95 cursor-pointer relative z-50 pointer-events-auto"
+            {/* Chat Header - MODERN GRADIENT DESIGN */}
+            <div className="px-4 py-4 border-b border-white/10 flex items-center gap-3 bg-gradient-to-r from-slate-900 via-indigo-950 to-slate-900 sticky top-0 z-40 pt-safe-top pointer-events-auto shadow-2xl">
+                {/* Back Button inside header */}
+                <div 
+                    onClick={(e) => {
+                        e.preventDefault();
+                        e.stopPropagation();
+                        onBack();
+                    }}
+                    className="group flex items-center justify-center w-11 h-11 bg-white/10 hover:bg-white/20 active:bg-white/30 rounded-full cursor-pointer relative z-[50] shadow-inner border border-white/10 shrink-0 transition-all active:scale-90"
                 >
-                    <ChevronLeft size={28} />
-                </button>
-                <div className="w-10 h-10 rounded-full overflow-hidden bg-slate-100 border border-slate-200 shrink-0">
+                    <ChevronLeft size={28} strokeWidth={3} className="text-white" />
+                </div>
+                
+                <div className="w-10 h-10 rounded-full overflow-hidden bg-white/10 border border-white/20 shrink-0 ml-1 shadow-lg">
                      <img src={safeAvatar} className="w-full h-full object-cover" alt="" />
                 </div>
                 
-                {/* Clickable Header Info */}
+                {/* Clickable Header Info - Link to Task */}
                 <div 
-                    className="flex-1 min-w-0 cursor-pointer group"
-                    onClick={() => onTaskClick && onTaskClick(task)}
+                    className="flex-1 min-w-0 cursor-pointer group py-1 active:opacity-50"
+                    onClick={(e) => {
+                        e.stopPropagation();
+                        onTaskClick && onTaskClick(task);
+                    }}
                 >
-                    <h3 className="font-bold text-slate-900 text-sm leading-tight group-hover:text-blue-600 transition-colors">{partnerName}</h3>
-                    <div className="flex items-center gap-1 text-[10px] text-slate-400 font-medium group-hover:text-blue-500 transition-colors">
-                        <span className="truncate max-w-[180px]">{task.title}</span>
-                        <ExternalLink size={10} />
+                    <h3 className="font-bold text-white text-sm leading-tight mb-0.5 tracking-tight">{partnerName}</h3>
+                    <div className="flex items-center gap-1.5 text-[10px] text-blue-400 font-bold group-hover:text-blue-300 transition-colors uppercase tracking-widest">
+                        <Briefcase size={10} className="text-blue-400/80" />
+                        <span className="truncate max-w-[150px]">{task.title}</span>
+                        <ExternalLink size={10} className="opacity-70" />
                     </div>
                 </div>
             </div>

@@ -154,7 +154,7 @@ export const AIChatCreation: React.FC<AIChatCreationProps> = ({ isOpen, onClose,
     setIsLoading(true);
     setError('');
     try {
-      const response = await sendMessageToGemini(chatSession, description, photos[0], []);
+      const response = await sendMessageToGemini(chatSession, description, photos[0]);
       if (response.error) {
         setError(response.error);
         setIsLoading(false);
@@ -187,7 +187,7 @@ export const AIChatCreation: React.FC<AIChatCreationProps> = ({ isOpen, onClose,
     setConversationHistory(prev => [...prev, { role: 'user', text: answer }]);
     setIsLoading(true);
     try {
-      const response = await sendMessageToGemini(chatSession, answer, null, conversationHistory);
+      const response = await sendMessageToGemini(chatSession, answer, null);
       if (response.analysis) { 
         setAiResult(response.analysis); 
         setStep('PREVIEW'); 

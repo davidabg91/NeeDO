@@ -14,7 +14,7 @@ interface TaskCardProps {
 }
 
 // Needo Logo Placeholder
-const DEFAULT_AVATAR = "https://ui-avatars.com/api/?name=N&background=2563eb&color=fff&size=128&bold=true&length=1";
+const DEFAULT_AVATAR = "/logo.jpg";
 
 export const TaskCard: React.FC<TaskCardProps> = ({ task, distanceKm, onClick, onOfferClick }) => {
     const { t } = useLanguage();

@@ -51,6 +51,7 @@ export interface Offer {
   startDate?: string;
   comment: string;
   createdAt: number;
+  providerStripeVerified?: boolean;
 }
 
 export interface Review {
@@ -111,6 +112,11 @@ export interface Task {
   requesterIsCompany?: boolean;
   offers: Offer[];
   acceptedOfferId?: string;
+  acceptedProviderId?: string;
+  acceptedProviderName?: string;
+  acceptedProviderAvatar?: string;
+  acceptedPrice?: number;
+  acceptedAt?: number;
   escrowAmount?: number;
   paymentIntentId?: string; // ID of the Stripe Payment Intent used for escrow
   reviews?: Review[];

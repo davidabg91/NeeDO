@@ -8,6 +8,8 @@ import {
   User as FirebaseUser,
   GoogleAuthProvider,
   signInWithPopup,
+  signInWithRedirect,
+  getRedirectResult,
   sendPasswordResetEmail
 } from 'firebase/auth';
 import { doc, setDoc, getDoc, getDocs, collection, updateDoc, query, where } from 'firebase/firestore';
@@ -51,7 +53,7 @@ export const syncUserProfile = async (fbUser: FirebaseUser): Promise<AppUser> =>
   };
 };
 
-export const loginUser = async (email: string, password?: string): Promise<User | null> => {
+export const loginUser = async (email: string, password?: string): Promise<AppUser | null> => {
   if (!password) throw new Error("Password is required");
   
   try {
@@ -68,58 +70,23 @@ export const loginUser = async (email: string, password?: string): Promise<User 
   }
 };
 
-export const loginWithGoogle = async (): Promise<User> => {
+export const loginWithGoogle = async (): Promise<AppUser | void> => {
   try {
     const provider = new GoogleAuthProvider();
+    
+    // Check if on mobile (iOS/Android) or if Safari (which often blocks popups)
+    const isMobile = /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent);
+    const isSafari = /^((?!chrome|android).)*safari/i.test(navigator.userAgent);
+
+    if (isMobile || isSafari) {
+      await signInWithRedirect(auth, provider);
+      return; // Will navigate away
+    }
+
     const result = await signInWithPopup(auth, provider);
     const fbUser = result.user;
-
-    // Check if user exists in Firestore
-    let userProfile: User | undefined;
-    try {
-        const userDoc = await getDoc(doc(db, "users", fbUser.uid));
-        if (userDoc.exists()) {
-            userProfile = userDoc.data() as User;
-            // Fix legacy rating
-            if (userProfile.reviewCount === 0 && userProfile.rating > 0) {
-              userProfile.rating = 0;
-            }
-        }
-    } catch (e) {
-        // Silent catch for permissions
-    }
-
-    // If user doesn't exist or DB read failed, assume new/update needed and construct profile
-    if (!userProfile) {
-        const newUser: User = {
-            id: fbUser.uid,
-            name: fbUser.displayName || fbUser.email?.split('@')[0] || 'Google User',
-            email: fbUser.email || '',
-            phoneNumber: '', // Google doesn't always provide phone
-            joinedAt: Date.now(),
-            rating: 0, // Changed from 5.0 to 0
-            reviewCount: 0,
-            // Use Google photo or Fallback to Logo
-            avatarUrl: fbUser.photoURL || DEFAULT_AVATAR,
-            status: 'ACTIVE',
-            isAdmin: fbUser.email === 'davida1991@gmail.com'
-        };
-
-        // Save to Firestore
-        try {
-            await setDoc(doc(db, "users", fbUser.uid), newUser, { merge: true });
-        } catch (e: any) {
-            if (e.code !== 'permission-denied') {
-                const errorMsg = e instanceof Error ? e.message : String(e);
-                console.warn("Could not create Google user in Firestore", errorMsg);
-            }
-        }
-        return newUser;
-    }
-
-    return userProfile;
+    return await handleAuthResult(fbUser);
   } catch (error: any) {
-    // Fix: Log stringified message to avoid circular structure error
     console.error("Google Login Error:", error instanceof Error ? error.message : String(error));
     if (error.code === 'auth/popup-closed-by-user') {
         throw new Error("Входът беше отказан.");
@@ -128,7 +95,68 @@ export const loginWithGoogle = async (): Promise<User> => {
   }
 };
 
-export const registerUser = async (name: string, email: string, phoneNumber: string): Promise<User> => {
+/**
+ * Handles the redirect result after coming back from Google login.
+ */
+export const handleRedirectResult = async (): Promise<AppUser | null> => {
+  try {
+    const result = await getRedirectResult(auth);
+    if (result) {
+      return await handleAuthResult(result.user);
+    }
+    return null;
+  } catch (error) {
+    console.error("Redirect Result Error:", error);
+    return null;
+  }
+};
+
+/**
+ * Internal helper to sync or create user profile after auth.
+ */
+const handleAuthResult = async (fbUser: FirebaseUser): Promise<AppUser> => {
+    // Check if user exists in Firestore
+    let userProfile: AppUser | undefined;
+    try {
+        const userDoc = await getDoc(doc(db, "users", fbUser.uid));
+        if (userDoc.exists()) {
+            userProfile = userDoc.data() as AppUser;
+            // Fix legacy rating
+            if (userProfile.reviewCount === 0 && userProfile.rating > 0) {
+              userProfile.rating = 0;
+            }
+        }
+    } catch (e) {
+        // Silent catch
+    }
+
+    // If user doesn't exist or DB read failed, assume new/update needed
+    if (!userProfile) {
+        const newUser: AppUser = {
+            id: fbUser.uid,
+            name: fbUser.displayName || fbUser.email?.split('@')[0] || 'Google User',
+            email: fbUser.email || '',
+            phoneNumber: '',
+            joinedAt: Date.now(),
+            rating: 0,
+            reviewCount: 0,
+            avatarUrl: fbUser.photoURL || DEFAULT_AVATAR,
+            status: 'ACTIVE',
+            isAdmin: fbUser.email === 'davida1991@gmail.com'
+        };
+
+        try {
+            await setDoc(doc(db, "users", fbUser.uid), newUser, { merge: true });
+        } catch (e: any) {
+            console.warn("Could not create Google user in Firestore", e.message);
+        }
+        return newUser;
+    }
+
+    return userProfile;
+};
+
+export const registerUser = async (name: string, email: string, phoneNumber: string): Promise<AppUser> => {
     // Fallback if invoked without password (legacy support)
     throw new Error("Registration requires a password.");
 };
@@ -141,7 +169,7 @@ export const registerUserWithPassword = async (
   isCompany?: boolean,
   companyCategory?: string,
   companyFoundedDate?: string
-): Promise<User> => {
+): Promise<AppUser> => {
   try {
     const userCredential = await createUserWithEmailAndPassword(auth, email, password);
     const fbUser = userCredential.user;

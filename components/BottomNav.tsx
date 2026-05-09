@@ -92,8 +92,12 @@ export const BottomNav: React.FC<BottomNavProps> = ({
           onClick={() => onChangeView('PROFILE')}
           tooltip={showTooltips ? "ПРОФИЛ" : undefined}
           icon={
-            isLoggedIn && userAvatar ? (
-              <img src={userAvatar} alt="Profile" className={`w-5 h-5 rounded-full object-cover ${currentView === 'PROFILE' ? 'ring-2 ring-[#8b5cf6]' : 'opacity-80'}`} />
+            isLoggedIn ? (
+              <img 
+                src={userAvatar || "/logo.jpg"} 
+                alt="Profile" 
+                className={`w-5 h-5 rounded-full object-cover border border-white/20 ${currentView === 'PROFILE' ? 'ring-2 ring-blue-500' : 'opacity-80'}`} 
+              />
             ) : (
               <User size={20} />
             )

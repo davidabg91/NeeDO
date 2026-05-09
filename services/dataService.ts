@@ -15,7 +15,8 @@ import {
     where,
     limit,
     limitToLast,
-    increment
+    increment,
+    collectionGroup
 } from 'firebase/firestore';
 import { Task, TaskStatus, Offer, Review, TaskQuestion, Notification, DirectMessage } from '../types';
 
@@ -241,7 +242,10 @@ export const subscribeToTasks = (callback: (tasks: Task[]) => void) => {
                     // Initialize empty arrays if not present (legacy or new structure)
                     offers: data.offers || [],
                     questions: data.questions || [],
-                    reviews: data.reviews || []
+                    reviews: data.reviews || [],
+                    offersCount: data.offersCount || 0,
+                    questionsCount: data.questionsCount || 0,
+                    reviewsCount: data.reviewsCount || 0
                 } as Task;
             });
             callback(tasks);
@@ -321,6 +325,44 @@ export const subscribeToTaskReviews = (taskId: string, callback: (reviews: Revie
         console.warn(`Reviews subscription failed for ${taskId}`, safeErrorMsg(error));
         callback([]);
     });
+};
+
+export const subscribeToUserReviews = (userId: string, callback: (reviews: Review[]) => void) => {
+    const q = query(
+        collectionGroup(db, 'reviews'),
+        where('toUserId', '==', userId),
+        orderBy('createdAt', 'desc')
+    );
+
+    return onSnapshot(q, (snapshot) => {
+        const reviews = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Review));
+        callback(reviews);
+    });
+};
+
+export const fetchTasksByUser = async (userId: string): Promise<Task[]> => {
+    try {
+        const tasksRef = collection(db, TASKS_COLLECTION);
+        
+        // Query tasks where user is requester
+        const q1 = query(tasksRef, where('requesterId', '==', userId));
+        const snapshot1 = await getDocs(q1);
+        const requesterTasks = snapshot1.docs.map(doc => ({ id: doc.id, ...doc.data() } as Task));
+
+        // Query tasks where user is the accepted provider
+        const q2 = query(tasksRef, where('acceptedProviderId', '==', userId));
+        const snapshot2 = await getDocs(q2);
+        const providerTasks = snapshot2.docs.map(doc => ({ id: doc.id, ...doc.data() } as Task));
+
+        // Combine and remove duplicates, sort by newest
+        const allUserTasks = [...requesterTasks, ...providerTasks];
+        const uniqueTasks = Array.from(new Map(allUserTasks.map(item => [item.id, item])).values());
+        
+        return uniqueTasks.sort((a, b) => b.createdAt - a.createdAt);
+    } catch (e) {
+        console.warn("fetchTasksByUser failed", safeErrorMsg(e));
+        return [];
+    }
 };
 
 
@@ -474,6 +516,22 @@ export const addReviewToTask = async (taskId: string, review: Review, completion
         }
 
         await updateDoc(taskRef, updates);
+
+        // --- NEW: Update User's Global Rating ---
+        const userRef = doc(db, 'users', review.toUserId);
+        const userDoc = await getDoc(userRef);
+        if (userDoc.exists()) {
+            const userData = userDoc.data();
+            const oldCount = userData.reviewCount || 0;
+            const oldRating = userData.rating || 0;
+            const newCount = oldCount + 1;
+            const newAverage = ((oldRating * oldCount) + review.rating) / newCount;
+
+            await updateDoc(userRef, {
+                rating: newAverage,
+                reviewCount: newCount
+            });
+        }
     } catch (e) {
         console.warn("Add review failed", safeErrorMsg(e));
     }

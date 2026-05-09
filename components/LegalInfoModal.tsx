@@ -333,7 +333,7 @@ export const LegalInfoModal: React.FC<LegalInfoModalProps> = ({ isOpen, onClose,
                                 number="05"
                                 title="Такси и Комисионни"
                                 icon={<Percent size={18} />}
-                                content="Needo работи на принципа на споделената отговорност. Комисионната е в размер на 3% за Възложителя (начислява се при плащане) и 3% за Изпълнителя (удържа се при превод). Всички цени са с включен ДДС, където е приложимо."
+                                content="Needo работи на принципа на споделената отговорност. Комисионна е в размер на 5% за Възложителя (начислява се при плащане) и 5% за Изпълнителя (удържа се при превод). Всички цени са с включен ДДС, където е приложимо."
                             />
                         </div>
                     </div>
@@ -392,7 +392,7 @@ export const LegalInfoModal: React.FC<LegalInfoModalProps> = ({ isOpen, onClose,
                                         <p className="text-[10px] text-slate-400 font-medium">Начислява се над сумата при депозит в Escrow.</p>
                                     </div>
                                     <div className="text-right mt-4 relative z-10">
-                                        <span className="block text-4xl font-black text-blue-400 drop-shadow-md">3%</span>
+                                        <span className="block text-4xl font-black text-blue-400 drop-shadow-md">5%</span>
                                         <span className="text-[10px] font-bold uppercase tracking-wide opacity-70">такса платформа</span>
                                     </div>
                                 </div>
@@ -405,7 +405,7 @@ export const LegalInfoModal: React.FC<LegalInfoModalProps> = ({ isOpen, onClose,
                                         <p className="text-[10px] text-slate-400 font-medium">Удържа се автоматично от заработената сума.</p>
                                     </div>
                                     <div className="text-right mt-4 relative z-10">
-                                        <span className="block text-4xl font-black text-emerald-400 drop-shadow-md">3%</span>
+                                        <span className="block text-4xl font-black text-emerald-400 drop-shadow-md">5%</span>
                                         <span className="text-[10px] font-bold uppercase tracking-wide opacity-70">такса платформа</span>
                                     </div>
                                 </div>

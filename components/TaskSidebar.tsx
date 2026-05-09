@@ -29,7 +29,7 @@ interface TaskSidebarProps {
     onOpenChat?: () => void;
 }
 
-const DEFAULT_AVATAR = "https://ui-avatars.com/api/?name=N&background=2563eb&color=fff&size=128&bold=true&length=1";
+const DEFAULT_AVATAR = "/logo.jpg";
 
 export const TaskSidebar: React.FC<TaskSidebarProps> = ({
     task,
@@ -81,6 +81,7 @@ export const TaskSidebar: React.FC<TaskSidebarProps> = ({
     const [requesterReviewProvider, setRequesterReviewProvider] = useState('');
     const [requesterEvidenceImage, setRequesterEvidenceImage] = useState('');
     const [isApproving, setIsApproving] = useState(false);
+    const [isAccepting, setIsAccepting] = useState(false);
     const [isDeleting, setIsDeleting] = useState(false);
     const [deleteStep, setDeleteStep] = useState<'IDLE' | 'CONFIRM'>('IDLE');
 
@@ -205,6 +206,18 @@ export const TaskSidebar: React.FC<TaskSidebarProps> = ({
     };
 
     // --- HANDLERS ---
+    const handleOfferAccept = async (offerId: string) => {
+        if (isAccepting) return;
+        setIsAccepting(true);
+        try {
+            await onAcceptOffer(task.id, offerId);
+        } catch (e) {
+            console.error("Offer accept wrapper failed", e);
+        } finally {
+            setIsAccepting(false);
+        }
+    };
+
     const handleProviderSubmit = () => {
         if (!completionImage) { alert('Задължително е да качите снимка на свършената работа.'); return; }
         if (providerRateRequester === 0) { alert('Моля, оставете рейтинг за клиента.'); return; }
@@ -431,6 +444,30 @@ export const TaskSidebar: React.FC<TaskSidebarProps> = ({
 
                     {/* --- DETAILS --- */}
                     <div className="relative z-30 bg-slate-950 px-4 pb-12 pt-6">
+
+                        {/* Stripe Missing Warning for Providers */}
+                        {!isRequester && me && !me.stripeOnboardingComplete && (
+                            <div className="mb-8 p-5 rounded-[24px] bg-gradient-to-br from-amber-500/20 to-orange-500/10 border border-amber-500/30 animate-in slide-in-from-top-4 duration-500 shadow-xl relative overflow-hidden group">
+                                <div className="absolute top-0 right-0 w-32 h-32 bg-amber-500/10 rounded-full blur-3xl -mr-10 -mt-10"></div>
+                                <div className="flex items-start gap-4 relative z-10">
+                                    <div className="w-12 h-12 bg-amber-500/20 rounded-2xl flex items-center justify-center text-amber-500 shrink-0">
+                                        <AlertCircle size={28} />
+                                    </div>
+                                    <div>
+                                        <h4 className="text-amber-100 font-black text-sm uppercase tracking-tight mb-1">Завършете своя Stripe профил</h4>
+                                        <p className="text-amber-100/70 text-[11px] leading-relaxed mb-3">
+                                            За да можете да **приемате плащания** и да вдъхвате доверие на клиентите, трябва да свържете банковата си сметка в секция „Финанси“ на вашия профил.
+                                        </p>
+                                        <button 
+                                            onClick={(e) => { e.stopPropagation(); onUserClick(me.id); }}
+                                            className="px-4 py-2 bg-amber-500 text-white text-[10px] font-black rounded-lg shadow-lg shadow-amber-500/20 active:scale-95 transition-all flex items-center gap-1.5"
+                                        >
+                                            КЪМ МОЯ ПРОФИЛ <ArrowRight size={14} />
+                                        </button>
+                                    </div>
+                                </div>
+                            </div>
+                        )}
 
                         {/* PANEL 1: TASK DETAILS */}
                         <div className="mb-8">
@@ -711,6 +748,11 @@ export const TaskSidebar: React.FC<TaskSidebarProps> = ({
                                                                     {isCompany && <div className="bg-indigo-600 text-white text-[9px] font-black px-3 py-1 rounded-bl-xl shadow-sm flex items-center gap-1"><Verified size={10} fill="currentColor" /> ФИРМА</div>}
                                                                     {!isCompany && <div className="bg-slate-700 text-white text-[9px] font-bold px-3 py-1 rounded-bl-xl shadow-sm flex items-center gap-1"><UserIcon size={10} /> {t('badge_individual')}</div>}
                                                                     {isAccepted && <div className="bg-green-50 text-white text-[9px] font-bold px-3 py-1 shadow-sm flex items-center gap-1 border-l border-white/20"><CheckCircle size={10} /> {t('badge_accepted')}</div>}
+                                                                    {offer.providerStripeVerified ? (
+                                                                        <div className="bg-emerald-500/20 text-emerald-400 text-[9px] font-black px-2 py-1 shadow-sm flex items-center gap-1 border-l border-white/10" title="Stripe Verified Payouts"><ShieldCheck size={10} strokeWidth={3} /> VERIFIED</div>
+                                                                    ) : (
+                                                                        <div className="bg-amber-500/20 text-amber-400 text-[9px] font-black px-2 py-1 shadow-sm flex items-center gap-1 border-l border-white/10" title="Missing Stripe Setup"><AlertTriangle size={10} strokeWidth={3} /> NO STRIPE</div>
+                                                                    )}
                                                                 </div>
 
                                                                 {/* COMPACT ROW PROFILE HEADER (Redesigned) */}
@@ -762,7 +804,19 @@ export const TaskSidebar: React.FC<TaskSidebarProps> = ({
                                                                     <div className="flex flex-col gap-1 relative z-10 items-center text-center">
                                                                         <div className="flex justify-center items-center"><span className={`text-[10px] font-bold uppercase tracking-widest flex items-center gap-1.5 ${isCompany ? 'text-indigo-400' : 'text-emerald-400'}`}><Tag size={12} /> {t('offer_price_label')}</span></div>
                                                                         <div className="flex items-baseline justify-center gap-1 mt-1"><span className="text-4xl font-black text-white tracking-tighter drop-shadow-lg">{offer.price}</span><span className={`text-lg font-bold ${isCompany ? 'text-indigo-400' : 'text-emerald-400'}`}>€</span></div>
-                                                                        {isRequester && task.status === TaskStatus.OPEN && <div className="mt-4 w-full"><button onClick={() => onAcceptOffer(task.id, offer.id)} className="w-full bg-white text-slate-900 py-3 rounded-xl text-sm font-black shadow-lg active:scale-[0.98] flex items-center justify-center gap-2">{t('btn_accept')} <ArrowRight size={16} /></button></div>}
+                                                                        {isRequester && task.status === TaskStatus.OPEN && (
+                                                                            <div className="mt-4 w-full">
+                                                                                <button 
+                                                                                    onClick={() => handleOfferAccept(offer.id)} 
+                                                                                    disabled={isAccepting}
+                                                                                    className="w-full bg-white text-slate-900 py-3 rounded-xl text-sm font-black shadow-lg active:scale-[0.98] flex items-center justify-center gap-2 disabled:opacity-70"
+                                                                                >
+                                                                                    {isAccepting ? <Loader2 size={16} className="animate-spin" /> : (
+                                                                                        <>{t('btn_accept')} <ArrowRight size={16} /></>
+                                                                                    )}
+                                                                                </button>
+                                                                            </div>
+                                                                        )}
                                                                     </div>
                                                                 </div>
                                                             </div>

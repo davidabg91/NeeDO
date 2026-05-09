@@ -5,7 +5,7 @@ import { X, Lock, ShieldCheck, Loader2 } from 'lucide-react';
 
 // Initialize Stripe outside of component to avoid recreating the object
 // In a real app, use an environment variable for the publishable key
-const stripePromise = loadStripe(import.meta.env.VITE_STRIPE_PUBLISHABLE_KEY || 'pk_test_51TRYJlBKl53MyTasCEsS42ZPcstD6F5aEPhXdiNuxvKsoZ9yBnnsfgKzuDRt4RAEVnPv8ZBPLJFdB2BRzeEj2RzO00y7OAEPFQ');
+const stripePromise = loadStripe(import.meta.env.VITE_STRIPE_PUBLISHABLE_KEY || 'pk_test_51TRYJTBmgLQY5UZ4jj9ZRJqqxCYfLuEJDSJOP05L8uKNrQME97tu0ACsYREdvgRcyOiAmDXlD2FfwvdtGbyx6Gbc00OAtfoLjp');
 
 interface CheckoutFormProps {
   amountEuro: number;
@@ -17,44 +17,46 @@ const CheckoutForm: React.FC<CheckoutFormProps> = ({ amountEuro, onSuccess, onCa
   const stripe = useStripe();
   const elements = useElements();
   const [isProcessing, setIsProcessing] = useState(false);
+  const [isReady, setIsReady] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
 
-    if (!stripe || !elements) {
+    if (!stripe || !elements || !isReady) {
       return;
     }
 
     setIsProcessing(true);
     setError(null);
 
-    const { error: submitError } = await stripe.confirmPayment({
-      elements,
-      confirmParams: {
-        // Stripe requires a return URL for some payment methods
-        // For cards, it often completes synchronously if no 3DS is required
-        // But we handle redirect-based payments as well
-        return_url: `${window.location.origin}/?payment_success=true`,
-      },
-      // Prevent automatic redirect if possible to keep the user in the SPA flow
-      redirect: "if_required",
-    });
+    try {
+      const { error: submitError } = await stripe.confirmPayment({
+        elements,
+        confirmParams: {
+          return_url: `${window.location.origin}/?payment_success=true`,
+        },
+        redirect: "if_required",
+      });
 
-    if (submitError) {
-      setError(submitError.message || "Възникна грешка при плащането.");
+      if (submitError) {
+        setError(submitError.message || "Възникна грешка при плащането.");
+        setIsProcessing(false);
+      } else {
+        // Payment successful or handled by redirect
+        onSuccess();
+      }
+    } catch (err) {
+      console.error("Payment submission error:", err);
+      setError("Възникна неочаквана грешка. Моля опитайте пак.");
       setIsProcessing(false);
-    } else {
-      // Payment successful
-      setIsProcessing(false);
-      onSuccess();
     }
   };
 
   return (
-    <form onSubmit={handleSubmit} className="flex flex-col h-full">
-      <div className="flex-1 overflow-y-auto px-6 py-4">
-        <PaymentElement />
+    <form onSubmit={handleSubmit} className="flex flex-col min-h-0 h-full overflow-hidden">
+      <div className="flex-1 overflow-y-auto px-6 py-4 overscroll-contain" style={{ WebkitOverflowScrolling: 'touch' }}>
+        <PaymentElement onReady={() => setIsReady(true)} />
         {error && (
           <div className="mt-4 p-3 bg-red-50 text-red-600 text-sm rounded-lg border border-red-200">
             {error}
@@ -62,14 +64,14 @@ const CheckoutForm: React.FC<CheckoutFormProps> = ({ amountEuro, onSuccess, onCa
         )}
       </div>
 
-      <div className="p-6 bg-slate-50 border-t border-slate-100 mt-auto">
+      <div className="p-6 bg-slate-50 border-t border-slate-100 flex-shrink-0">
         <button
           type="submit"
-          disabled={!stripe || isProcessing}
-          className="w-full py-4 bg-slate-900 text-white font-bold rounded-xl flex items-center justify-center gap-2 disabled:opacity-50 transition-all hover:bg-slate-800 shadow-lg"
+          disabled={!stripe || isProcessing || !isReady}
+          className="w-full py-4 bg-slate-900 text-white font-bold rounded-xl flex items-center justify-center gap-2 disabled:opacity-50 transition-all hover:bg-slate-800 shadow-lg active:scale-[0.98]"
         >
-          {isProcessing ? <Loader2 size={18} className="animate-spin" /> : <Lock size={18} />}
-          Депозирай {amountEuro} €
+          {isProcessing ? <Loader2 size={18} className="animate-spin" /> : (isReady ? <Lock size={18} /> : <Loader2 size={18} className="animate-spin" />)}
+          {isReady ? `Депозирай ${amountEuro} €` : 'Зареждане...'}
         </button>
         <button
           type="button"
@@ -96,10 +98,10 @@ export const PaymentModal: React.FC<PaymentModalProps> = ({ isOpen, onClose, cli
   if (!isOpen) return null;
 
   return (
-    <div className="fixed inset-0 z-[300] flex items-center justify-center p-4">
+    <div className="fixed inset-0 z-[300] flex items-center justify-center p-2 sm:p-4">
       <div className="absolute inset-0 bg-slate-900/60 backdrop-blur-sm" onClick={() => !clientSecret ? onClose() : null}></div>
       
-      <div className="bg-white w-full max-w-md rounded-3xl overflow-hidden shadow-2xl relative z-10 animate-in zoom-in-95 duration-200 flex flex-col max-h-[90vh]">
+      <div className="bg-white w-full max-w-md rounded-3xl overflow-hidden shadow-2xl relative z-10 animate-in zoom-in-95 duration-200 flex flex-col max-h-[95vh] sm:max-h-[90vh]">
         <div className="p-5 border-b border-slate-100 flex items-center justify-between bg-slate-50">
           <div>
             <h2 className="text-lg font-black text-slate-900 flex items-center gap-2">

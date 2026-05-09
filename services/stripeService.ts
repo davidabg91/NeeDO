@@ -50,7 +50,7 @@ export const stripeService = {
         paymentIntentId,
         providerAccountId,
         amount: amountEuro, // This is the base Agreed Price
-        platformFeePercent: 3 // Provider pays 3% of base price (Client already paid extra 3%)
+        platformFeePercent: 5 // Provider pays 5% of base price (Client already paid extra 5%)
       }),
     });
 
@@ -60,5 +60,61 @@ export const stripeService = {
     }
 
     return true;
+  },
+
+  /**
+   * Checks if the user has completed Stripe onboarding.
+   */
+  async checkStripeStatus(userId: string): Promise<{ onboardingComplete: boolean }> {
+    const res = await fetch(`${CLOUD_FUNCTIONS_BASE_URL}/checkStripeStatus`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ userId }),
+    });
+
+    if (!res.ok) {
+      const err = await res.json();
+      throw new Error(err.error || "Failed to check Stripe status");
+    }
+
+    return await res.json();
+  },
+
+  /**
+   * Generates a login link for the Stripe Express Dashboard.
+   */
+  async createStripeLoginLink(userId: string): Promise<string> {
+    const res = await fetch(`${CLOUD_FUNCTIONS_BASE_URL}/createStripeLoginLink`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ userId }),
+    });
+
+    if (!res.ok) {
+      const err = await res.json();
+      throw new Error(err.error || "Failed to create login link");
+    }
+
+    const data = await res.json();
+    return data.url;
+  },
+
+  /**
+   * Fetches the real-time balance from Stripe for the user.
+   */
+  async getStripeBalance(userId: string): Promise<{ available: number; pending: number; currency: string }> {
+    const res = await fetch(`${CLOUD_FUNCTIONS_BASE_URL}/getStripeBalance`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ userId }),
+    });
+
+    if (!res.ok) {
+      const err = await res.json();
+      throw new Error(err.error || "Failed to fetch balance");
+    }
+
+    return await res.json();
   }
 };
+

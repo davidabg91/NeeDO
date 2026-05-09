@@ -1,11 +1,12 @@
-import React, { useState, useRef } from 'react';
-import { AppUser, Task, TaskStatus } from '../types';
+import React, { useState, useRef, useEffect } from 'react';
+import { AppUser, Task, TaskStatus, Review } from '../types';
 import { X, Star, Settings, Wallet, CreditCard, Check, Loader2, Building2, LogOut, Camera, ChevronRight, Calendar, ShieldCheck, Briefcase, MapPin, Grid, Heart, Clock, ArrowRight, Layout, Zap, Edit2, ExternalLink, Award, TrendingUp, Bell, User as UserIcon, Tag, Sparkles, AlertCircle, Link } from 'lucide-react';
 import { StarRating } from './StarRating';
 import { updateUserProfile } from '../services/authService';
 import { CATEGORIES_LIST } from '../constants';
 import { useLanguage } from '../contexts/LanguageContext';
 import { stripeService } from '../services/stripeService';
+import { subscribeToUserReviews, fetchTasksByUser } from '../services/dataService';
 
 interface UserProfileProps {
   user: AppUser;
@@ -18,7 +19,7 @@ interface UserProfileProps {
   onUserUpdate?: (data: Partial<AppUser>) => void;
 }
 
-const DEFAULT_AVATAR = "https://ui-avatars.com/api/?name=N&background=007AFF&color=fff&size=128&bold=true&length=1";
+const DEFAULT_AVATAR = "/logo.jpg";
 
 export const UserProfile: React.FC<UserProfileProps> = ({ 
   user, 
@@ -44,7 +45,52 @@ export const UserProfile: React.FC<UserProfileProps> = ({
   const [isConnectingStripe, setIsConnectingStripe] = useState(false);
   const [stripeBusinessType, setStripeBusinessType] = useState<'individual' | 'company'>('individual');
   const [isStripeLoading, setIsStripeLoading] = useState(false);
-  
+  const [stripeBalance, setStripeBalance] = useState<{ available: number; pending: number } | null>(null);
+  const [userReviews, setUserReviews] = useState<Review[]>([]);
+  const [userTasks, setUserTasks] = useState<Task[]>([]);
+  const [isLoadingTasks, setIsLoadingTasks] = useState(false);
+
+  // Fetch real Stripe balance when finances tab is opened
+  useEffect(() => {
+    if (activeTab === 'FINANCES' && isCurrentUserProfile && user.stripeAccountId) {
+      const fetchBalance = async () => {
+        try {
+          const balance = await stripeService.getStripeBalance(user.id);
+          setStripeBalance(balance);
+        } catch (error) {
+          console.error("Failed to fetch Stripe balance:", error);
+        }
+      };
+      fetchBalance();
+    }
+  }, [activeTab, isCurrentUserProfile, user.id, user.stripeAccountId]);
+
+  // Subscribe to user reviews and fetch user tasks
+  useEffect(() => {
+    if (isOpen) {
+      let isMounted = true;
+      const loadData = async () => {
+        setIsLoadingTasks(true);
+        const fetchedTasks = await fetchTasksByUser(user.id);
+        if (isMounted) {
+          setUserTasks(fetchedTasks);
+          setIsLoadingTasks(false);
+        }
+      };
+
+      loadData();
+
+      const unsubscribe = subscribeToUserReviews(user.id, (reviews) => {
+        if (isMounted) setUserReviews(reviews);
+      });
+      
+      return () => {
+        isMounted = false;
+        unsubscribe();
+      };
+    }
+  }, [user.id, isOpen]);
+
   // Avatar Upload State
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [isUploadingAvatar, setIsUploadingAvatar] = useState(false);
@@ -53,34 +99,35 @@ export const UserProfile: React.FC<UserProfileProps> = ({
 
   if (!isOpen) return null;
 
-  // Filter Tasks
-  const createdTasks = tasks.filter(t => t.requesterId === user.id).sort((a, b) => b.createdAt - a.createdAt);
-  const completedTasks = tasks.filter(t => {
-    const acceptedOffer = t.offers.find(o => o.id === t.acceptedOfferId);
-    return acceptedOffer && acceptedOffer.providerId === user.id && t.status === TaskStatus.CLOSED;
-  }).sort((a, b) => b.createdAt - a.createdAt);
+  // Filter Tasks using userTasks (fetched specifically for this user)
+  const createdTasks = userTasks.filter(t => t.requesterId === user.id).sort((a, b) => b.createdAt - a.createdAt);
+  const completedTasks = userTasks.filter(t => 
+    t.acceptedProviderId === user.id && t.status === TaskStatus.CLOSED
+  ).sort((a, b) => b.createdAt - a.createdAt);
 
-  // Reviews Logic
-  const allReceivedReviews = tasks.flatMap(t => {
-      const userReviews = (t.reviews || []).filter(r => r.toUserId === user.id);
-      return userReviews.map(r => ({ ...r, taskContext: t }));
-  });
+  // Enrich reviews with task context during render
+  const enrichedReviews = userReviews.map(r => ({
+    ...r,
+    taskContext: userTasks.find(t => t.id === r.taskId) || tasks.find(t => t.id === r.taskId)
+  }));
 
-  const providerReviews = allReceivedReviews
-      .filter(r => r.taskContext.requesterId !== user.id)
+  // Reviews Logic - correctly split by role
+  const providerReviews = enrichedReviews
+      .filter(r => r.taskContext && r.taskContext.requesterId !== user.id)
       .sort((a, b) => b.createdAt - a.createdAt);
 
-  const requesterReviews = allReceivedReviews
-      .filter(r => r.taskContext.requesterId === user.id)
+  const requesterReviews = enrichedReviews
+      .filter(r => r.taskContext && r.taskContext.requesterId === user.id)
       .sort((a, b) => b.createdAt - a.createdAt);
 
-  const calcAvg = (list: typeof allReceivedReviews) => list.length > 0 ? list.reduce((a, b) => a + b.rating, 0) / list.length : 0;
+  const calcAvg = (list: Review[]) => list.length > 0 ? list.reduce((a, b) => a + b.rating, 0) / list.length : 0;
   
-  const totalReviewsCount = allReceivedReviews.length;
-  const totalRating = calcAvg(allReceivedReviews);
+  const totalReviewsCount = userReviews.length;
+  // Use global rating if available, otherwise calculate from fetched reviews
+  const calculatedAvg = calcAvg(userReviews);
+  const totalRating = user.rating && user.reviewCount > 0 ? user.rating : calculatedAvg;
   const totalEarnings = completedTasks.reduce((sum, task) => {
-     const offer = task.offers.find(o => o.id === task.acceptedOfferId);
-     return sum + (offer ? offer.price : 0);
+     return sum + (task.acceptedPrice || 0);
   }, 0);
   
   // Resolve Categories for Display
@@ -172,7 +219,6 @@ export const UserProfile: React.FC<UserProfileProps> = ({
       }
   };
 
-  // REAL STRIPE CONNECT
   const handleConnectStripe = async () => {
       setIsStripeLoading(true);
       try {
@@ -181,6 +227,37 @@ export const UserProfile: React.FC<UserProfileProps> = ({
       } catch (error) {
           console.error("Stripe Connection Error:", error);
           alert("Грешка при свързване със Stripe. Моля опитайте пак.");
+      } finally {
+          setIsStripeLoading(false);
+      }
+  };
+
+  const handleRefreshStripeStatus = async () => {
+      setIsStripeLoading(true);
+      try {
+          const result = await stripeService.checkStripeStatus(user.id);
+          if (result.onboardingComplete) {
+              if (onUserUpdate) onUserUpdate({ stripeOnboardingComplete: true });
+              alert("Акаунтът е свързан успешно!");
+          } else {
+              alert("Акаунтът все още не е напълно конфигуриран в Stripe. Моля довършете всички стъпки там.");
+          }
+      } catch (error) {
+          console.error("Refresh Stripe Status Error:", error);
+          alert("Грешка при проверката. Моля опитайте пак.");
+      } finally {
+          setIsStripeLoading(false);
+      }
+  };
+
+  const handleOpenStripeDashboard = async () => {
+      setIsStripeLoading(true);
+      try {
+          const url = await stripeService.createStripeLoginLink(user.id);
+          window.open(url, '_blank');
+      } catch (error) {
+          console.error("Dashboard Link Error:", error);
+          alert("Грешка при отваряне на таблото. Моля опитайте пак.");
       } finally {
           setIsStripeLoading(false);
       }
@@ -208,15 +285,15 @@ export const UserProfile: React.FC<UserProfileProps> = ({
         <div className="fixed inset-0 bg-black/60 backdrop-blur-md z-0" onClick={onClose}></div>
         
         {/* Main Card */}
-        <div className="relative w-full h-[100dvh] md:h-[90vh] md:max-w-6xl bg-[#F2F2F7] md:rounded-[40px] shadow-2xl flex flex-col md:flex-row overflow-y-auto md:overflow-hidden z-10 transition-transform duration-300 scrollbar-hide">
+        <div className="relative w-full h-[100dvh] md:h-[90vh] md:max-w-6xl bg-slate-50/80 md:rounded-[40px] shadow-2xl flex flex-col md:flex-row overflow-y-auto md:overflow-hidden z-10 transition-transform duration-300 scrollbar-hide">
             
             {/* LEFT COLUMN: Profile Info */}
-            <div className="w-full md:w-[350px] bg-white border-b md:border-b-0 md:border-r border-slate-200/50 flex flex-col relative z-20 shadow-[4px_0_24px_rgba(0,0,0,0.02)] shrink-0 md:h-full md:overflow-y-auto">
+            <div className="w-full md:w-[350px] bg-white/40 backdrop-blur-md border-b md:border-b-0 md:border-r border-slate-200/50 flex flex-col relative z-20 shadow-[4px_0_24px_rgba(0,0,0,0.02)] shrink-0 md:h-full md:overflow-y-auto">
                 
                 {/* Mobile Close */}
                 <button 
                     onClick={onClose}
-                    className="md:hidden absolute top-4 right-4 w-9 h-9 bg-white/20 backdrop-blur-md border border-white/20 rounded-full flex items-center justify-center text-white z-50 active:scale-90 transition-transform shadow-sm"
+                    className="md:hidden absolute top-4 right-4 w-9 h-9 bg-black/10 backdrop-blur-md border border-white/20 rounded-full flex items-center justify-center text-slate-800 z-50 active:scale-90 transition-transform shadow-sm"
                 >
                     <X size={20} />
                 </button>
@@ -310,7 +387,7 @@ export const UserProfile: React.FC<UserProfileProps> = ({
 
                     {/* Colorful Stats Grid */}
                     <div className="w-full grid grid-cols-2 gap-3 mb-8">
-                         <div className="bg-white p-4 rounded-3xl flex flex-col items-center justify-center border border-slate-100 shadow-sm hover:shadow-md transition-shadow group">
+                         <div className="bg-white/40 backdrop-blur-md p-4 rounded-3xl flex flex-col items-center justify-center border border-white/40 shadow-sm hover:shadow-md transition-shadow group">
                              <div className="mb-2 p-2 bg-amber-50 rounded-full text-amber-500 group-hover:scale-110 transition-transform">
                                 <Star size={18} className="fill-current" />
                              </div>
@@ -318,7 +395,7 @@ export const UserProfile: React.FC<UserProfileProps> = ({
                              <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wide">Рейтинг</span>
                          </div>
 
-                         <div className="bg-white p-4 rounded-3xl flex flex-col items-center justify-center border border-slate-100 shadow-sm hover:shadow-md transition-shadow group">
+                         <div className="bg-white/40 backdrop-blur-md p-4 rounded-3xl flex flex-col items-center justify-center border border-white/40 shadow-sm hover:shadow-md transition-shadow group">
                              <div className="mb-2 p-2 bg-purple-50 rounded-full text-purple-500 group-hover:scale-110 transition-transform">
                                  <Check size={18} strokeWidth={4} />
                              </div>
@@ -345,7 +422,7 @@ export const UserProfile: React.FC<UserProfileProps> = ({
             </div>
 
             {/* RIGHT COLUMN: Content */}
-            <div className="flex-1 flex flex-col bg-[#F2F2F7] md:h-full relative md:overflow-hidden min-h-0">
+            <div className="flex-1 flex flex-col bg-transparent md:h-full relative md:overflow-hidden min-h-0">
                 
                 {/* Desktop Close */}
                 <button 
@@ -356,11 +433,11 @@ export const UserProfile: React.FC<UserProfileProps> = ({
                 </button>
 
                 {/* iOS Style Segmented Control Navigation */}
-                <div className="px-6 md:px-10 pt-6 md:pt-10 pb-4 shrink-0 bg-[#F2F2F7] z-30 sticky top-0 md:relative">
-                    <h1 className="text-2xl md:text-3xl font-black text-slate-900 mb-6 hidden md:block tracking-tight">Моят Профил</h1>
+                <div className="px-6 md:px-10 pt-6 md:pt-10 pb-4 shrink-0 bg-white/20 backdrop-blur-md z-30 sticky top-0 md:relative">
+                    <h1 className="text-2xl md:text-3xl font-black text-slate-900 mb-6 hidden md:block tracking-tight">Профил</h1>
                     
                     <div className="relative group">
-                        <div className="p-1 bg-[#E5E5EA] rounded-xl flex overflow-x-auto scrollbar-hide snap-x md:flex-wrap relative z-10">
+                        <div className="p-1 bg-black/5 rounded-xl flex overflow-x-auto scrollbar-hide snap-x md:flex-wrap relative z-10">
                             {tabs.map(tab => (
                                 <button
                                     key={tab.id}
@@ -368,7 +445,7 @@ export const UserProfile: React.FC<UserProfileProps> = ({
                                     className={`
                                         flex-1 flex items-center justify-center gap-2 px-3 py-2 rounded-[10px] text-xs font-bold whitespace-nowrap transition-all duration-200 snap-center min-w-[30%] md:min-w-0 md:grow
                                         ${activeTab === tab.id 
-                                            ? 'bg-white text-black shadow-[0_2px_8px_rgba(0,0,0,0.12)] transform scale-[1.02]' 
+                                            ? 'bg-white text-indigo-600 shadow-lg shadow-indigo-200/50 transform scale-[1.02]' 
                                             : 'text-slate-500 hover:text-slate-800'
                                         }
                                     `}
@@ -379,7 +456,7 @@ export const UserProfile: React.FC<UserProfileProps> = ({
                             ))}
                         </div>
                         {/* Shadow Gradient for scroll on mobile only */}
-                        <div className="absolute right-0 top-0 bottom-0 w-12 bg-gradient-to-l from-[#E5E5EA] to-transparent pointer-events-none rounded-r-xl flex items-center justify-end pr-1 md:hidden z-20">
+                        <div className="absolute right-0 top-0 bottom-0 w-12 bg-gradient-to-l from-indigo-50/50 to-transparent pointer-events-none rounded-r-xl flex items-center justify-end pr-1 md:hidden z-20">
                             <ChevronRight size={14} className="text-slate-400 animate-pulse" />
                         </div>
                     </div>
@@ -498,7 +575,7 @@ export const UserProfile: React.FC<UserProfileProps> = ({
                                     <EmptyState icon={<Star size={32} />} title="Няма отзиви" sub="Все още няма оставени мнения." />
                                 )}
                                 {(reviewRole === 'PROVIDER' ? providerReviews : requesterReviews).map(review => (
-                                    <div key={review.id} onClick={() => onTaskClick(review.taskContext)} className="bg-white p-5 rounded-[24px] shadow-sm active:scale-[0.98] transition-transform cursor-pointer">
+                                    <div key={review.id} onClick={() => review.taskContext && onTaskClick(review.taskContext)} className="bg-white/40 backdrop-blur-md p-5 rounded-[24px] border border-white/40 shadow-sm active:scale-[0.98] transition-transform cursor-pointer">
                                         <div className="flex justify-between items-start mb-3">
                                             <div className="flex items-center gap-3">
                                                 <div className="w-10 h-10 rounded-full bg-gradient-to-br from-indigo-100 to-purple-100 flex items-center justify-center text-indigo-600 font-black">
@@ -520,7 +597,7 @@ export const UserProfile: React.FC<UserProfileProps> = ({
                                         </div>
                                         <div className="flex items-center gap-1.5 text-[10px] font-bold text-slate-400 uppercase tracking-wide">
                                             <Briefcase size={12} />
-                                            <span className="truncate">{review.taskContext.title}</span>
+                                            <span className="truncate">{review.taskContext?.title || "Изтрита задача"}</span>
                                         </div>
                                     </div>
                                 ))}
@@ -545,11 +622,22 @@ export const UserProfile: React.FC<UserProfileProps> = ({
                                 </div>
                                 
                                 <div className="relative z-10">
-                                    <p className="text-white/60 text-xs font-medium mb-1">Available for Payout</p>
-                                    <div className="flex items-baseline gap-1">
-                                        <span className="text-5xl font-black tracking-tight">{totalEarnings.toFixed(2)}</span>
+                                    <p className="text-white/60 text-[10px] font-bold uppercase tracking-widest mb-1">Available for Payout</p>
+                                    <div className="flex items-baseline gap-1 mb-4">
+                                        <span className="text-5xl font-black tracking-tight">
+                                            {stripeBalance ? stripeBalance.available.toFixed(2) : totalEarnings.toFixed(2)}
+                                        </span>
                                         <span className="text-xl font-bold text-blue-400">EUR</span>
                                     </div>
+
+                                    {stripeBalance && stripeBalance.pending > 0 && (
+                                        <div className="flex items-center gap-2 bg-white/5 backdrop-blur-md px-3 py-1.5 rounded-xl border border-white/10 w-fit">
+                                            <div className="w-1.5 h-1.5 rounded-full bg-amber-400 animate-pulse"></div>
+                                            <span className="text-[10px] font-bold text-white/70">
+                                                Pending: <span className="text-white">{stripeBalance.pending.toFixed(2)} EUR</span>
+                                            </span>
+                                        </div>
+                                    )}
                                 </div>
 
                                 <div className="relative z-10 flex items-center justify-between border-t border-white/10 pt-4 mt-2">
@@ -605,11 +693,19 @@ export const UserProfile: React.FC<UserProfileProps> = ({
                                         <button 
                                             onClick={handleConnectStripe}
                                             disabled={isStripeLoading}
-                                            className="w-full py-4 bg-[#635BFF] hover:bg-[#5851E3] text-white rounded-xl font-bold text-sm shadow-lg shadow-indigo-500/30 active:scale-[0.98] transition-all flex items-center justify-center gap-2"
+                                            className="w-full py-4 bg-[#635BFF] hover:bg-[#5851E3] text-white rounded-xl font-bold text-sm shadow-lg shadow-indigo-500/30 active:scale-[0.98] transition-all flex items-center justify-center gap-2 mb-3"
                                         >
                                             {isStripeLoading ? <Loader2 size={18} className="animate-spin" /> : (
                                                 <>Свържи се със Stripe <ArrowRight size={18} /></>
                                             )}
+                                        </button>
+
+                                        <button 
+                                            onClick={handleRefreshStripeStatus}
+                                            disabled={isStripeLoading}
+                                            className="w-full py-2.5 bg-white text-slate-600 border border-slate-200 rounded-xl font-bold text-xs hover:bg-slate-50 transition-all flex items-center justify-center gap-2"
+                                        >
+                                            <Clock size={14} /> Провери статус на свързване
                                         </button>
                                         
                                         <p className="text-[9px] text-slate-400 mt-4 flex items-center justify-center gap-1">
@@ -634,9 +730,14 @@ export const UserProfile: React.FC<UserProfileProps> = ({
                                         </div>
                                     </div>
 
-                                    <button className="w-full py-3 bg-slate-900 text-white rounded-xl font-bold text-xs flex items-center justify-center gap-2 hover:bg-slate-800 transition-colors">
-                                        <ExternalLink size={14} />
-                                        Към Stripe Табло
+                                    <button 
+                                        onClick={handleOpenStripeDashboard}
+                                        disabled={isStripeLoading}
+                                        className="w-full py-3 bg-slate-900 text-white rounded-xl font-bold text-xs flex items-center justify-center gap-2 hover:bg-slate-800 transition-colors disabled:opacity-50"
+                                    >
+                                        {isStripeLoading ? <Loader2 size={14} className="animate-spin" /> : (
+                                            <><ExternalLink size={14} /> Към Stripe Табло</>
+                                        )}
                                     </button>
                                 </div>
                             )}
