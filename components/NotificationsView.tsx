@@ -1,7 +1,7 @@
 
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { Notification, Task, AppUser, DirectMessage, TaskStatus } from '../types';
-import { Bell, CheckCircle, DollarSign, Briefcase, Info, Clock, MessageCircle, Send, ChevronLeft, User as UserIcon, ExternalLink, Loader2, ArrowUpCircle, Zap } from 'lucide-react';
+import { Bell, CheckCircle, DollarSign, Briefcase, Info, Clock, MessageCircle, Send, ChevronLeft, User as UserIcon, ExternalLink, Loader2, ArrowUpCircle, Zap, TrendingUp, Layout, ArrowRight } from 'lucide-react';
 import { subscribeToDirectMessages, sendDirectMessage, markNotificationRead, fetchOlderMessages } from '../services/dataService';
 import { useLanguage } from '../contexts/LanguageContext';
 
@@ -31,7 +31,7 @@ export const NotificationsView: React.FC<NotificationsViewProps> = ({
   isChatActiveExternal
 }) => {
   const { t } = useLanguage();
-  const [activeTab, setActiveTab] = useState<'NOTIFICATIONS' | 'MESSAGES'>('NOTIFICATIONS');
+  const [activeTab, setActiveTab] = useState<'NOTIFICATIONS' | 'MESSAGES' | 'ACTIVE_DEALS'>('NOTIFICATIONS');
   const [activeChatTask, setActiveChatTask] = useState<Task | null>(null);
 
   // ... filtering logic ...
@@ -142,6 +142,14 @@ export const NotificationsView: React.FC<NotificationsViewProps> = ({
                         <span className="bg-red-500 text-white text-[9px] min-w-[16px] h-4 px-1 rounded-full flex items-center justify-center animate-pulse">{unreadMessageCount}</span>
                     )}
                 </button>
+                <button 
+                    onClick={() => setActiveTab('ACTIVE_DEALS')}
+                    className={`flex-1 py-2.5 rounded-xl text-xs font-bold transition-all flex items-center justify-center gap-2 relative ${
+                        activeTab === 'ACTIVE_DEALS' ? 'bg-slate-900 text-white shadow-md' : 'text-slate-500 hover:bg-slate-50'
+                    }`}
+                >
+                    <TrendingUp size={16} /> Активни
+                </button>
             </div>
 
             {/* Content Area */}
@@ -162,6 +170,64 @@ export const NotificationsView: React.FC<NotificationsViewProps> = ({
                         notifications={messageNotifications} // Pass message notifs to highlight specific chats
                         onSelectTask={handleOpenChat} 
                     />
+                )}
+
+                {activeTab === 'ACTIVE_DEALS' && currentUser && (
+                    <div className="animate-in fade-in slide-in-from-bottom-4 duration-500 space-y-4">
+                        {tasks.filter(t => (t.requesterId === currentUser.id || t.acceptedProviderId === currentUser.id) && t.status === TaskStatus.IN_PROGRESS).length === 0 && (
+                            <div className="flex flex-col items-center justify-center py-20 text-center opacity-60">
+                                <div className="w-16 h-16 bg-slate-100 rounded-full flex items-center justify-center mb-3">
+                                    <Layout size={32} className="text-slate-300" />
+                                </div>
+                                <h3 className="text-sm font-bold text-slate-700 mb-1">Няма активни сделки</h3>
+                                <p className="text-xs text-slate-400 max-w-[200px]">
+                                    В момента нямате обяви, които да са в процес на работа.
+                                </p>
+                            </div>
+                        )}
+                        {tasks.filter(t => (t.requesterId === currentUser.id || t.acceptedProviderId === currentUser.id) && t.status === TaskStatus.IN_PROGRESS).map(task => {
+                            const isUserRequester = task.requesterId === currentUser.id;
+                            return (
+                                <div 
+                                    key={task.id} 
+                                    onClick={() => onTaskClick && onTaskClick(task)}
+                                    className="bg-white rounded-[24px] p-4 border border-slate-100 shadow-sm hover:shadow-xl transition-all duration-300 cursor-pointer group flex gap-4 relative overflow-hidden"
+                                >
+                                    <div className="w-20 h-20 rounded-2xl overflow-hidden bg-slate-100 shrink-0 relative shadow-inner">
+                                        <img src={task.imageUrl || "/logo.jpg"} className="w-full h-full object-cover group-hover:scale-110 transition-transform duration-700" alt="" />
+                                        <div className="absolute top-1 left-1">
+                                            <div className={`px-1.5 py-0.5 rounded-md text-[7px] font-black uppercase tracking-widest shadow-lg ${isUserRequester ? 'bg-blue-600 text-white' : 'bg-purple-600 text-white'}`}>
+                                                {isUserRequester ? 'Клиент' : 'Майстор'}
+                                            </div>
+                                        </div>
+                                    </div>
+
+                                    <div className="flex-1 flex flex-col justify-center min-w-0">
+                                        <div className="flex justify-between items-start gap-2 mb-1">
+                                            <h4 className="font-black text-slate-900 text-[13px] leading-tight uppercase tracking-tight group-hover:text-indigo-600 transition-colors truncate">{task.title}</h4>
+                                            <span className="shrink-0 bg-green-50 text-green-600 px-2 py-0.5 rounded-full text-[8px] font-black uppercase tracking-widest border border-green-100">
+                                                АКТИВНА
+                                            </span>
+                                        </div>
+                                        
+                                        <div className="flex items-center gap-3 mt-2">
+                                            <div className="flex items-center gap-1.5 bg-slate-50 px-2 py-1 rounded-lg border border-slate-100">
+                                                <DollarSign size={12} className="text-emerald-500" />
+                                                <span className="text-[11px] font-black text-slate-700">{task.acceptedPrice || 0} €</span>
+                                            </div>
+                                            <div className="flex items-center gap-1.5 bg-slate-50 px-2 py-1 rounded-lg border border-slate-100">
+                                                <Clock size={12} className="text-blue-500" />
+                                                <span className="text-[9px] font-bold text-slate-400">{new Date(task.createdAt).toLocaleDateString()}</span>
+                                            </div>
+                                            <div className="flex items-center gap-1 ml-auto group-hover:translate-x-1 transition-transform">
+                                                <ArrowRight size={14} className="text-indigo-600" />
+                                            </div>
+                                        </div>
+                                    </div>
+                                </div>
+                            );
+                        })}
+                    </div>
                 )}
 
             </div>

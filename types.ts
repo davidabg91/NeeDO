@@ -34,8 +34,14 @@ export interface AppUser {
   lastSeen?: number;
 
   // Stripe Connect Fields
-  stripeAccountId?: string; // The connected account ID (acct_...)
-  stripeOnboardingComplete?: boolean; // Whether they finished the KYC process
+  stripeAccountId?: string; // Legacy field (defaults to individual)
+  stripeOnboardingComplete?: boolean;
+  
+  // Dual account support
+  stripeAccountId_individual?: string;
+  stripeOnboardingComplete_individual?: boolean;
+  stripeAccountId_company?: string;
+  stripeOnboardingComplete_company?: boolean;
 }
 
 export interface Offer {
@@ -45,6 +51,7 @@ export interface Offer {
   providerName: string;
   providerAvatar?: string;
   providerIsCompany?: boolean;
+  billingType?: 'individual' | 'company'; // NEW: Identity used for this offer
   price: number;
   currency: string;
   duration: string;
@@ -117,12 +124,15 @@ export interface Task {
   acceptedProviderAvatar?: string;
   acceptedPrice?: number;
   acceptedAt?: number;
+  acceptedProviderStripeAccountId?: string; // New: Preserved Stripe ID for payment release
   escrowAmount?: number;
   paymentIntentId?: string; // ID of the Stripe Payment Intent used for escrow
   reviews?: Review[];
   questions?: TaskQuestion[];
   imageUrl?: string;
   images?: string[];
+  requesterPhone?: string; // New: Denormalized for quick contact
+  acceptedProviderPhone?: string; // New: Denormalized for quick contact
 
   // New field for timing preference
   timing?: string;
@@ -140,6 +150,49 @@ export interface Task {
   offersCount?: number;
   questionsCount?: number;
   reviewsCount?: number;
+
+  // --- In-Progress Management Fields ---
+  materialsPayments?: MaterialsPayment[];
+  extensionRequests?: ExtensionRequest[];
+  circumstances?: TaskCircumstance[];
+  additionalEscrowAmount?: number; // Total extra funds held in escrow
+  
+  // Cancellation & Disputes
+  requesterAgreedCancel?: boolean;
+  providerAgreedCancel?: boolean;
+  cancelReason?: string;
+  cancelInitiatedBy?: string; // userId
+  
+  reportedByRequester?: boolean;
+  reportReason?: string;
+  reportCreatedAt?: number;
+}
+
+export interface MaterialsPayment {
+  id: string;
+  amount: number;
+  description: string;
+  status: 'PENDING' | 'PAID';
+  createdAt: number;
+  paymentIntentId?: string;
+}
+
+export interface ExtensionRequest {
+  id: string;
+  newDate: string;
+  reason: string;
+  status: 'PENDING' | 'ACCEPTED' | 'REJECTED';
+  createdAt: number;
+}
+
+export interface TaskCircumstance {
+  id: string;
+  description: string;
+  requestedPrice?: number;
+  requestedExtension?: string;
+  status: 'PENDING' | 'ACCEPTED' | 'REJECTED';
+  createdAt: number;
+  additionalPaymentIntentId?: string;
 }
 
 export interface ChatMessage {

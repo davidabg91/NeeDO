@@ -1,6 +1,25 @@
 rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
+    // Tasks and their sub-collections are public to read
+    match /tasks/{taskId} {
+      allow read: if true;
+      allow create: if request.auth != null;
+      allow update, delete: if request.auth != null;
+      
+      match /{allSubcollections=**} {
+        allow read: if true;
+        allow write: if request.auth != null;
+      }
+    }
+    
+    // User profiles are public to read
+    match /users/{userId} {
+      allow read: if true;
+      allow write: if request.auth != null && request.auth.uid == userId;
+    }
+    
+    // Notifications and other data remain private
     match /{document=**} {
       allow read, write: if request.auth != null;
     }

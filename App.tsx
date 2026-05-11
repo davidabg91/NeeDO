@@ -23,6 +23,8 @@ import {
     addReviewToTask,
     addQuestionToTask,
     answerQuestionInTask,
+    updateTaskFields,
+    arrayUnion,
     subscribeToNotifications,
     sendNotification,
     markNotificationRead,
@@ -37,7 +39,7 @@ import {
 import { Search, ChevronDown, ChevronUp, WifiOff, Info, MapPin, Clock, TrendingUp, Filter, SortAsc, X, Users, Layers, Check, Loader2, ShieldCheck, Zap, Radio, Camera, Coins, Command, LayoutGrid, ChevronRight, Globe } from 'lucide-react';
 import { auth, db } from './firebase';
 import { onAuthStateChanged } from 'firebase/auth';
-import { doc, onSnapshot } from 'firebase/firestore';
+import { doc, onSnapshot, getDoc } from 'firebase/firestore';
 import { CATEGORIES_LIST } from './constants';
 import { LanguageProvider, useLanguage } from './contexts/LanguageContext';
 import { LanguageSwitcher } from './components/LanguageSwitcher';
@@ -88,6 +90,26 @@ const AppContent: React.FC = () => {
     const [selectedTask, setSelectedTask] = useState<Task | null>(null);
     const [isChatOpen, setIsChatOpen] = useState(false);
     const [isQAExpanded, setIsQAExpanded] = useState(false);
+    const [viewedTaskIds, setViewedTaskIds] = useState<Set<string>>(new Set());
+
+    // Persistence for viewed tasks
+    useEffect(() => {
+        try {
+            const saved = localStorage.getItem('needo_viewed_tasks');
+            if (saved) {
+                const ids = JSON.parse(saved);
+                if (Array.isArray(ids)) setViewedTaskIds(new Set(ids));
+            }
+        } catch (e) { console.error("Error loading viewed tasks", e); }
+    }, []);
+
+    useEffect(() => {
+        if (viewedTaskIds.size > 0) {
+            try {
+                localStorage.setItem('needo_viewed_tasks', JSON.stringify(Array.from(viewedTaskIds)));
+            } catch (e) { console.error("Error saving viewed tasks", e); }
+        }
+    }, [viewedTaskIds]);
 
     const [selectedCategory, setSelectedCategory] = useState('Всички');
     const [visibleLabelId, setVisibleLabelId] = useState<string | null>(null);
@@ -104,13 +126,27 @@ const AppContent: React.FC = () => {
 
     // STRIPE PAYMENT STATE
     const [isPaymentModalOpen, setIsPaymentModalOpen] = useState(false);
+    const [paymentType, setPaymentType] = useState<'ESCROW' | 'MATERIALS' | 'ADDITIONAL'>('ESCROW');
     const [stripeClientSecret, setStripeClientSecret] = useState<string | null>(null);
     const [paymentAmount, setPaymentAmount] = useState<number>(0);
     const [pendingPaymentTaskId, setPendingPaymentTaskId] = useState<string | null>(null);
+    const [pendingMaterialsPaymentId, setPendingMaterialsPaymentId] = useState<string | null>(null);
+    const [pendingCircumstanceId, setPendingCircumstanceId] = useState<string | null>(null);
     const [paymentIntentId, setPaymentIntentId] = useState<string | null>(null);
 
     const [mapCenter, setMapCenter] = useState<[number, number]>([42.6977, 23.3219]);
     const [userLocation, setUserLocation] = useState<[number, number] | null>(null);
+    const [profilesCache, setProfilesCache] = useState<Record<string, AppUser>>({});
+
+    // Helper to get or fetch user from cache
+    const getCachedUser = async (userId: string): Promise<AppUser | undefined> => {
+        if (profilesCache[userId]) return profilesCache[userId];
+        const user = await getUserById(userId);
+        if (user) {
+            setProfilesCache(prev => ({ ...prev, [userId]: user }));
+        }
+        return user;
+    };
     const [mapViewTrigger, setMapViewTrigger] = useState(0);
 
     const [currentUser, setCurrentUser] = useState<AppUser | null>(null);
@@ -128,7 +164,7 @@ const AppContent: React.FC = () => {
 
     const [isDirectMessageOpen, setIsDirectMessageOpen] = useState(false);
     const [targetChatTask, setTargetChatTask] = useState<Task | null>(null);
-    const [viewedTaskIds, setViewedTaskIds] = useState<Set<string>>(new Set());
+
 
     // Tooltips & Welcome State
     const [showTooltips, setShowTooltips] = useState(true);
@@ -157,28 +193,45 @@ const AppContent: React.FC = () => {
         const params = new URLSearchParams(window.location.search);
         const taskId = params.get('taskId');
 
-        if (taskId && tasks.length > 0 && !selectedTask) {
+        if (taskId && !selectedTask) {
+            // First check if it's already in the list
             const found = tasks.find(t => t.id === taskId);
             if (found) {
                 setSelectedTask(found);
-                // Clean URL without refresh
                 window.history.replaceState({}, '', window.location.pathname);
+            } else {
+                // If not in list, fetch it directly
+                const taskRef = doc(db, 'tasks', taskId);
+                getDoc(taskRef).then(snap => {
+                    if (snap.exists()) {
+                        setSelectedTask({ id: snap.id, ...snap.data() } as Task);
+                        window.history.replaceState({}, '', window.location.pathname);
+                    }
+                }).catch(e => console.warn("Failed to fetch deep-linked task", e));
             }
         }
-    }, [tasks]); // Run when tasks load
+    }, [tasks, selectedTask?.id]); // Run when tasks load or if selectedTask is missing
     
     // Handle Stripe Onboarding Return
     useEffect(() => {
         const params = new URLSearchParams(window.location.search);
-        if (params.get('stripe_return') === 'true' && currentUser) {
+        const isReturn = params.get('stripe_return') === 'true';
+        const returnType = params.get('type') as 'individual' | 'company' | null;
+        
+        if (isReturn && currentUser) {
             const checkStatus = async () => {
                 try {
-                    const result = await stripeService.checkStripeStatus(currentUser.id);
+                    // Slight delay to allow Stripe API to synchronize
+                    await new Promise(r => setTimeout(r, 1500));
+                    
+                    const typeToCheck = returnType || 'individual';
+                    const result = await stripeService.checkStripeStatus(currentUser.id, typeToCheck);
+                    
                     if (result.onboardingComplete) {
-                        // Update local user state immediately
-                        setCurrentUser(prev => prev ? { ...prev, stripeOnboardingComplete: true } : null);
-                        // Clean URL
+                        // Clean URL and switch to profile to show success
                         window.history.replaceState({}, '', window.location.pathname);
+                        setViewMode('PROFILE');
+                        setViewingProfileUser(currentUser);
                     }
                 } catch (e) {
                     console.error("Stripe return check failed", e);
@@ -240,8 +293,33 @@ const AppContent: React.FC = () => {
 
     useEffect(() => {
         let unsubscribeUserDoc: (() => void) | null = null;
+        let isHandlingRedirect = true;
+
+        const initAuth = async () => {
+            try {
+                // 1. Check for Redirect Result first (Critical for Mobile)
+                console.log("Auth: Checking redirect result...");
+                const redirectUser = await handleRedirectResult();
+                if (redirectUser) {
+                    console.log("Auth: Redirect user found", redirectUser.id);
+                    setCurrentUser(redirectUser);
+                } else {
+                    console.log("Auth: No redirect result found.");
+                }
+            } catch (e) {
+                console.error("Auth: Redirect check failed", e);
+            } finally {
+                isHandlingRedirect = false;
+                // If we don't have a user yet after redirect check, and auth is already initialized
+                if (!auth.currentUser) {
+                    setAuthLoading(false);
+                }
+            }
+        };
 
         const unsubscribeAuth = onAuthStateChanged(auth, async (firebaseUser) => {
+            console.log("Auth: State changed", firebaseUser ? firebaseUser.uid : "logged out");
+            
             // Cleanup previous user doc listener if any
             if (unsubscribeUserDoc) {
                 unsubscribeUserDoc();
@@ -250,32 +328,37 @@ const AppContent: React.FC = () => {
 
             try {
                 if (firebaseUser) {
-                    // Initial sync
+                    // Initial sync from Firestore
                     const userData = await syncUserProfile(firebaseUser);
                     setCurrentUser(userData);
 
-                    // --- NEW: Real-time listener for user profile changes ---
+                    // Real-time listener for user profile changes
                     const userRef = doc(db, "users", firebaseUser.uid);
                     unsubscribeUserDoc = onSnapshot(userRef, (docSnap) => {
                         if (docSnap.exists()) {
                             const data = docSnap.data() as AppUser;
-                            // Fix legacy rating
                             if (data.reviewCount === 0 && data.rating > 0) data.rating = 0;
                             setCurrentUser(data);
                         }
                     });
-                } else {
+                } else if (!isHandlingRedirect) {
+                    // Only set to null if we aren't currently waiting for a redirect result
                     setCurrentUser(null);
                 }
             } catch (e) {
-                console.error("Auth state error:", e);
-                setCurrentUser(null);
+                console.error("Auth: State synchronization error:", e);
+                if (!isHandlingRedirect) setCurrentUser(null);
             } finally {
-                setAuthLoading(false);
+                // Only stop loading if we aren't waiting for the redirect check to finish
+                if (!isHandlingRedirect) {
+                    setAuthLoading(false);
+                }
             }
         });
 
-        // Safety timeout to hide splash screen even if Firebase hangs
+        initAuth();
+
+        // Safety timeout to hide splash screen if Firebase hangs
         const timeout = setTimeout(() => setAuthLoading(false), 8000);
 
         return () => {
@@ -285,20 +368,21 @@ const AppContent: React.FC = () => {
         };
     }, []);
 
-    // --- NEW: Handle Google Redirect Result (Fix for iOS/Mobile) ---
+    // NEW: Sync viewingProfileUser with currentUser updates (Real-time sync)
     useEffect(() => {
-        const checkRedirect = async () => {
-            try {
-                const user = await handleRedirectResult();
-                if (user) {
-                    setCurrentUser(user);
-                }
-            } catch (e) {
-                console.error("Redirect check failed", e);
+        if (currentUser && viewingProfileUser && currentUser.id === viewingProfileUser.id) {
+            // Only update if there's an actual change to prevent infinite loops
+            if (JSON.stringify(currentUser) !== JSON.stringify(viewingProfileUser)) {
+                setViewingProfileUser(currentUser);
             }
-        };
-        checkRedirect();
-    }, []);
+        }
+        
+        // AUTO-CLOSE AUTH MODAL ON SUCCESS:
+        // If we have a user and the login modal is open, close it.
+        if (currentUser && isAuthModalOpen) {
+            setIsAuthModalOpen(false);
+        }
+    }, [currentUser, isAuthModalOpen]);
 
     useEffect(() => {
         if (currentUser) {
@@ -316,6 +400,17 @@ const AppContent: React.FC = () => {
         };
     }, [currentUser]);
 
+    // FAIL-SAFE: Global event listener for materials payment
+    useEffect(() => {
+        const handleGlobalPaymentTrigger = (e: any) => {
+            const { taskId, paymentId } = e.detail;
+            console.log("Global payment event caught:", { taskId, paymentId });
+            handlePayMaterials(taskId, paymentId);
+        };
+        window.addEventListener('NEEDO_PAYMENT_TRIGGERED', handleGlobalPaymentTrigger);
+        return () => window.removeEventListener('NEEDO_PAYMENT_TRIGGERED', handleGlobalPaymentTrigger);
+    }, [tasks, currentUser]); // Re-bind if tasks or user change
+
     useEffect(() => {
         if (selectedTask) {
             const updated = tasks.find(t => t.id === selectedTask.id);
@@ -324,7 +419,9 @@ const AppContent: React.FC = () => {
                 // We compare title or createdAt as a proxy for 'new doc version' from subscribeToTasks
                 const needsUpdate = updated.title !== selectedTask.title ||
                     updated.status !== selectedTask.status ||
-                    updated.description !== selectedTask.description;
+                    updated.description !== selectedTask.description ||
+                    JSON.stringify(updated.materialsPayments) !== JSON.stringify(selectedTask.materialsPayments) ||
+                    JSON.stringify(updated.extensionRequests) !== JSON.stringify(selectedTask.extensionRequests);
 
                 if (needsUpdate) {
                     setSelectedTask(prev => prev ? { ...updated, offers: prev.offers, questions: prev.questions, reviews: prev.reviews } : updated);
@@ -339,15 +436,28 @@ const AppContent: React.FC = () => {
         if (!selectedTask) return;
 
         const unsubscribeOffers = subscribeToTaskOffers(selectedTask.id, (offers) => {
-            setSelectedTask(prev => (prev && prev.id === selectedTask.id) ? { ...prev, offers } : prev);
+            setSelectedTask(prev => {
+                if (!prev || prev.id !== selectedTask.id) return prev;
+                // If sub-collection is empty but we have embedded offers (legacy), keep them
+                if (offers.length === 0 && prev.offers.length > 0) return prev;
+                return { ...prev, offers };
+            });
         });
 
         const unsubscribeQuestions = subscribeToTaskQuestions(selectedTask.id, (questions) => {
-            setSelectedTask(prev => (prev && prev.id === selectedTask.id) ? { ...prev, questions } : prev);
+            setSelectedTask(prev => {
+                if (!prev || prev.id !== selectedTask.id) return prev;
+                if (questions.length === 0 && (prev.questions?.length || 0) > 0) return prev;
+                return { ...prev, questions };
+            });
         });
 
         const unsubscribeReviews = subscribeToTaskReviews(selectedTask.id, (reviews) => {
-            setSelectedTask(prev => (prev && prev.id === selectedTask.id) ? { ...prev, reviews } : prev);
+            setSelectedTask(prev => {
+                if (!prev || prev.id !== selectedTask.id) return prev;
+                if (reviews.length === 0 && (prev.reviews?.length || 0) > 0) return prev;
+                return { ...prev, reviews };
+            });
         });
 
         return () => {
@@ -359,7 +469,7 @@ const AppContent: React.FC = () => {
 
 
     useEffect(() => {
-        if (currentUser) {
+        if (currentUser?.id) {
             const unsubscribe = subscribeToNotifications(currentUser.id, (updatedNotifs) => {
                 setNotifications(updatedNotifs);
             });
@@ -367,7 +477,7 @@ const AppContent: React.FC = () => {
         } else {
             setNotifications([]);
         }
-    }, [currentUser]);
+    }, [currentUser?.id]);
 
     useEffect(() => {
         if (navigator.geolocation) {
@@ -486,7 +596,22 @@ const AppContent: React.FC = () => {
                 if (response.ok) {
                     const data = await response.json();
                     if (data && !data.error) {
-                        finalAddress = data.display_name.split(',').slice(0, 3).join(', ');
+                        const addr = data.address || {};
+                        const road = addr.road || addr.pedestrian || addr.footway || addr.cycleway || addr.path || addr.street;
+                        const num = addr.house_number;
+                        const quarter = addr.suburb || addr.neighbourhood || addr.city_district || addr.quarter || addr.hamlet;
+                        const city = addr.city || addr.town || addr.village;
+
+                        let parts = [];
+                        if (road) parts.push(num ? `${road} ${num}` : road);
+                        if (quarter) parts.push(quarter);
+                        if (city) parts.push(city);
+
+                        if (parts.length > 0) {
+                            finalAddress = parts.join(', ');
+                        } else {
+                            finalAddress = data.display_name.split(',').slice(0, 3).join(', ');
+                        }
                     }
                 }
             } catch (error) {
@@ -516,6 +641,7 @@ const AppContent: React.FC = () => {
             requesterRating: userToUse.rating,
             requesterReviewCount: userToUse.reviewCount,
             requesterAvatar: userToUse.avatarUrl,
+            requesterPhone: userToUse.phoneNumber,
             requesterIsCompany: userToUse.isCompany,
             offers: [],
             questions: [],
@@ -542,21 +668,40 @@ const AppContent: React.FC = () => {
         executeTaskCreation(analysis, images, locationMode, manualAddress, manualCoordinates, estimatedPrice, timing);
     };
 
-    const handleAddOffer = async (taskId: string, price: number, duration: string, description: string, date: string, isCompanyOverride?: boolean) => {
+    const handleAddOffer = async (taskId: string, price: number, duration: string, description: string, date: string, billingType: any = 'individual') => {
         if (!currentUser) {
             setIsAuthModalOpen(true);
             return;
         }
-        const task = tasks.find(t => t.id === taskId);
+        
+        // Ensure billingType is a valid string even if passed as boolean
+        const finalBillingType = billingType === true ? 'company' : (billingType === false ? 'individual' : billingType);
+        
+        let task = tasks.find(t => t.id === taskId) || (selectedTask?.id === taskId ? selectedTask : null);
+        
+        // If task still not found, fetch it directly from Firestore to ensure notification is sent
+        if (!task) {
+            try {
+                const taskSnap = await getDoc(doc(db, 'tasks', taskId));
+                if (taskSnap.exists()) {
+                    task = { id: taskSnap.id, ...taskSnap.data() } as Task;
+                }
+            } catch (e) {
+                console.warn("Failed to fetch task for notification", e);
+            }
+        }
+
+        const isCompany = finalBillingType === 'company';
         const newOffer: Offer = {
             id: Date.now().toString(),
             taskId,
             providerId: currentUser.id,
             providerName: currentUser.name,
             providerAvatar: currentUser.avatarUrl,
-            providerIsCompany: isCompanyOverride !== undefined ? isCompanyOverride : currentUser.isCompany,
+            providerIsCompany: isCompany,
+            billingType: finalBillingType as any,
             price,
-            currency: 'EUR', // UPDATED to EUR
+            currency: 'EUR',
             duration,
             comment: description,
             startDate: date,
@@ -571,7 +716,7 @@ const AppContent: React.FC = () => {
                 userId: task.requesterId,
                 type: 'OFFER_RECEIVED',
                 title: `Нова оферта: ${task.title}`,
-                message: `${currentUser.name} предложи ${price} €`, // UPDATED to €
+                message: `${currentUser.name} предложи ${price} €`,
                 taskId: task.id,
                 isRead: false,
                 createdAt: Date.now()
@@ -598,11 +743,19 @@ const AppContent: React.FC = () => {
         }
 
         try {
+            // Fetch the provider's fresh profile to get their stripe account ID
+            const providerProfile = await getUserById(offer.providerId);
+            const stripeAccountId = offer.billingType === 'company' 
+                ? providerProfile?.stripeAccountId_company 
+                : (providerProfile?.stripeAccountId_individual || providerProfile?.stripeAccountId);
+
             await updateTaskStatus(taskId, TaskStatus.AWAITING_PAYMENT, { 
                 acceptedOfferId: offerId,
                 acceptedProviderId: offer.providerId,
                 acceptedProviderName: offer.providerName,
                 acceptedProviderAvatar: offer.providerAvatar,
+                acceptedProviderPhone: providerProfile?.phoneNumber,
+                acceptedProviderStripeAccountId: stripeAccountId,
                 acceptedPrice: offer.price,
                 acceptedAt: Date.now()
             });
@@ -635,6 +788,7 @@ const AppContent: React.FC = () => {
         setPendingPaymentTaskId(taskId);
         const totalToPay = offer.price * 1.05; // Agreed price + 5% client fee
         setPaymentAmount(totalToPay);
+        setPaymentType('ESCROW');
         setIsPaymentModalOpen(true);
         setStripeClientSecret(null);
 
@@ -656,24 +810,81 @@ const AppContent: React.FC = () => {
         const offer = task?.offers?.find(o => o.id === task?.acceptedOfferId);
         
         setIsPaymentModalOpen(false);
-        setPendingPaymentTaskId(null);
         setStripeClientSecret(null);
 
-        await updateTaskStatus(taskId, TaskStatus.IN_PROGRESS, { 
-            escrowAmount: paymentAmount,
-            paymentIntentId: paymentIntentId || undefined
-        });
-
-        if (offer && task) {
-            await sendNotification({
-                userId: offer.providerId,
-                type: 'PAYMENT_RELEASED',
-                title: 'Плащането е депозирано (Escrow)',
-                message: `Можете да започнете работа по "${task.title}". Сумата е защитена.`,
-                taskId: task.id,
-                isRead: false,
-                createdAt: Date.now()
+        if (paymentType === 'ESCROW') {
+            await updateTaskStatus(taskId, TaskStatus.IN_PROGRESS, { 
+                escrowAmount: paymentAmount,
+                paymentIntentId: paymentIntentId || undefined,
+                acceptedAt: Date.now()
             });
+
+            const targetProviderId = offer ? offer.providerId : task?.acceptedProviderId;
+            if (targetProviderId && task) {
+                await sendNotification({
+                    userId: targetProviderId,
+                    type: 'PAYMENT_RELEASED',
+                    title: 'Плащането е депозирано (Escrow)',
+                    message: `Можете да започнете работа по "${task.title}". Сумата е защитена.`,
+                    taskId: task.id,
+                    isRead: false,
+                    createdAt: Date.now()
+                });
+            }
+            setPendingPaymentTaskId(null);
+        } else if (paymentType === 'MATERIALS' && pendingMaterialsPaymentId) {
+            const updatedPayments = task?.materialsPayments?.map(p => 
+                p.id === pendingMaterialsPaymentId ? { ...p, status: 'PAID', paidAt: Date.now() } : p
+            );
+            await updateTaskFields(taskId, { materialsPayments: updatedPayments });
+            
+            const targetProviderId = offer ? offer.providerId : task?.acceptedProviderId;
+            if (targetProviderId && task) {
+                await sendNotification({
+                    userId: targetProviderId,
+                    type: 'SYSTEM',
+                    title: 'Получено плащане за материали',
+                    message: `Клиентът плати ${paymentAmount} € за материали по "${task.title}". Сумата е изпратена директно към вас.`,
+                    taskId: task.id,
+                    isRead: false,
+                    createdAt: Date.now()
+                });
+            }
+
+            setPendingPaymentTaskId(null);
+            setPendingMaterialsPaymentId(null);
+        } else if (paymentType === 'ADDITIONAL' && pendingCircumstanceId) {
+            const circ = task?.circumstances?.find(c => c.id === pendingCircumstanceId);
+            const updatedCircs = task?.circumstances?.map(c => 
+                c.id === pendingCircumstanceId ? { ...c, status: 'APPROVED' } : c
+            );
+            
+            const fields: any = { circumstances: updatedCircs };
+            if (circ?.requestedExtension) {
+                fields.startDate = circ.requestedExtension; // Updates deadline visually
+            }
+            
+            // Add extra price to total escrow amount
+            const newEscrowAmount = (task?.escrowAmount || 0) + paymentAmount;
+            fields.escrowAmount = newEscrowAmount;
+            
+            await updateTaskFields(taskId, fields);
+            
+            const targetProviderId = offer ? offer.providerId : task?.acceptedProviderId;
+            if (targetProviderId && task) {
+                await sendNotification({
+                    userId: targetProviderId,
+                    type: 'SYSTEM',
+                    title: 'Обстоятелството е прието и платено',
+                    message: `Клиентът одобри промените и доплати ${paymentAmount} € по задача "${task.title}". Сумата е защитена в ескроу.`,
+                    taskId: task.id,
+                    isRead: false,
+                    createdAt: Date.now()
+                });
+            }
+            
+            setPendingPaymentTaskId(null);
+            setPendingCircumstanceId(null);
         }
     };
 
@@ -696,6 +907,10 @@ const AppContent: React.FC = () => {
 
         await addReviewToTask(taskId, newReview);
         await updateTaskStatus(taskId, TaskStatus.IN_REVIEW, { completionImageUrl: completionImage, submittedAt: Date.now() });
+
+        // Manually update local state for instant UI response
+        setTasks(prev => prev.map(t => t.id === taskId ? { ...t, status: TaskStatus.IN_REVIEW, completionImageUrl: completionImage, submittedAt: Date.now() } : t));
+        setSelectedTask(prev => prev && prev.id === taskId ? { ...prev, status: TaskStatus.IN_REVIEW, completionImageUrl: completionImage, submittedAt: Date.now() } : prev);
 
         await sendNotification({
             userId: task.requesterId,
@@ -733,8 +948,16 @@ const AppContent: React.FC = () => {
 
         if (task.paymentIntentId) {
             try {
-                const providerUser = await getUserById(offer.providerId);
-                const providerAccountId = providerUser?.stripeAccountId;
+                // Use the preserved ID from the task if available, otherwise fallback to fetching profile
+                let providerAccountId = task.acceptedProviderStripeAccountId;
+                const isCompanyOffer = offer.billingType === 'company';
+
+                if (!providerAccountId) {
+                    const providerUser = await getUserById(offer.providerId);
+                    providerAccountId = isCompanyOffer 
+                        ? providerUser?.stripeAccountId_company 
+                        : (providerUser?.stripeAccountId_individual || providerUser?.stripeAccountId);
+                }
                 
                 if (providerAccountId) {
                     try {
@@ -742,15 +965,16 @@ const AppContent: React.FC = () => {
                     } catch (paymentError: any) {
                         const errorMsg = paymentError.message || "";
                         if (errorMsg.includes("capabilities") || errorMsg.includes("transfers")) {
-                            alert("⚠️ Неуспешен превод: Изпълнителят все още не е завършил своята Stripe регистрация или акаунтът му не е напълно активиран. Моля, уведомете изпълнителя да провери своя профил и да завърши настройките в Stripe, за да може да получи сумата.");
+                            const identity = isCompanyOffer ? "фирма" : "физическо лице";
+                            alert(`⚠️ Неуспешен превод: Изпълнителят все още не е завършил своята Stripe регистрация като ${identity}. Моля, уведомете изпълнителя да провери своя профил.`);
                         } else {
                             alert(`Грешка при освобождаване на плащането: ${errorMsg || 'Моля опитайте пак.'}`);
                         }
                         return; // stop execution if payment fails
                     }
                 } else {
-                    console.error("Provider has no Stripe account linked to receive funds.");
-                    alert("❌ Внимание: Изпълнителят няма свързан Stripe акаунт за получаване на превода. Моля свържете се с него чрез чата и го помолете да свърже акаунта си в своя профил.");
+                    const identity = isCompanyOffer ? "фирмен" : "личен";
+                    alert(`❌ Внимание: Изпълнителят няма свързан ${identity} Stripe акаунт за получаване на превода.`);
                     return;
                 }
             } catch (error: any) {
@@ -758,10 +982,21 @@ const AppContent: React.FC = () => {
                 alert("Възникна грешка при проверка на статуса на изпълнителя.");
                 return;
             }
+        } else {
+            console.warn("No paymentIntentId found for task", taskId);
+            // If it's a paid task but no intent ID, we should probably warn
+            if (task.status === TaskStatus.IN_PROGRESS || task.status === TaskStatus.IN_REVIEW) {
+                 alert("⚠️ Внимание: Не е намерена информация за плащането (PaymentIntent ID). Свържете се с поддръжката.");
+                 return;
+            }
         }
 
         await addReviewToTask(taskId, newReview);
         await updateTaskStatus(taskId, TaskStatus.CLOSED);
+
+        // Manually update local state for instant UI response
+        setTasks(prev => prev.map(t => t.id === taskId ? { ...t, status: TaskStatus.CLOSED } : t));
+        setSelectedTask(prev => prev && prev.id === taskId ? { ...prev, status: TaskStatus.CLOSED } : prev);
 
         await sendNotification({
             userId: offer.providerId,
@@ -861,13 +1096,395 @@ const AppContent: React.FC = () => {
         }
     };
 
-    const getProviderRating = (providerId: string) => {
+    // --- NEW PROGRESS MANAGEMENT HANDLERS ---
+
+    const handleMaterialsRequest = async (taskId: string, amount: number, description: string) => {
+        if (!currentUser) return;
+        const task = tasks.find(t => t.id === taskId);
+        if (!task) return;
+
+        const request = {
+            id: Date.now().toString(),
+            amount,
+            description,
+            status: 'PENDING',
+            createdAt: Date.now()
+        };
+
+        await updateTaskFields(taskId, {
+            materialsPayments: arrayUnion(request)
+        });
+
+        await sendNotification({
+            userId: task.requesterId,
+            type: 'SYSTEM',
+            title: 'Искане за материали',
+            message: `Изпълнителят поиска ${amount} € за материали: "${description}"`,
+            taskId: taskId,
+            isRead: false,
+            createdAt: Date.now()
+        });
+    };
+
+    const handlePayMaterials = async (taskId: string, paymentId: string) => {
+        console.log("handlePayMaterials triggered:", { taskId, paymentId });
+        if (!currentUser) {
+            alert("Моля, влезте в профила си, за да платите.");
+            return;
+        }
+        const task = tasks.find(t => t.id === taskId);
+        const payment = task?.materialsPayments?.find(p => p.id === paymentId);
+        
+        const providerId = task?.acceptedProviderId || task?.offers?.find(o => o.id === task?.acceptedOfferId)?.providerId;
+        const offer = task?.offers?.find(o => o.id === task?.acceptedOfferId);
+
+        console.log("Task/Payment context:", { taskExists: !!task, paymentExists: !!payment, providerId });
+
+        if (!task || !payment) {
+            alert("Грешка: Не можем да намерим задачата или плащането.");
+            return;
+        }
+
+        if (!providerId) {
+            alert("Грешка: Не можем да намерим изпълнителя за тази задача.");
+            return;
+        }
+
+        setPendingPaymentTaskId(taskId);
+        setPendingMaterialsPaymentId(paymentId);
+        setPaymentAmount(payment.amount);
+        setPaymentType('MATERIALS');
+        setIsPaymentModalOpen(true);
+        setStripeClientSecret(null);
+
+        try {
+            const providerUser = await getUserById(providerId);
+            const isCompany = offer ? offer.billingType === 'company' : false;
+            // If offer is missing, try all available stripe account ID fields
+            const providerAccountId = isCompany 
+                ? providerUser?.stripeAccountId_company 
+                : (providerUser?.stripeAccountId_individual || providerUser?.stripeAccountId || providerUser?.stripeAccountId_company);
+
+            if (!providerAccountId) {
+                alert("Изпълнителят няма свързан Stripe акаунт за получаване на плащания.");
+                setIsPaymentModalOpen(false);
+                return;
+            }
+
+            const { clientSecret, paymentIntentId } = await stripeService.createMaterialsPaymentIntent(
+                payment.amount,
+                providerAccountId,
+                taskId,
+                paymentId
+            );
+
+            setStripeClientSecret(clientSecret);
+            setPaymentIntentId(paymentIntentId);
+        } catch (e: any) {
+            console.error("Failed to create materials payment intent", e);
+            alert(`Грешка при плащане: ${e.message}`);
+            setIsPaymentModalOpen(false);
+        }
+    };
+
+    const handleRejectMaterials = async (taskId: string, paymentId: string, reason: string) => {
+        const task = tasks.find(t => t.id === taskId);
+        const payment = task?.materialsPayments?.find(p => p.id === paymentId);
+        if (!task || !payment) return;
+
+        const updatedPayments = task.materialsPayments?.map(p => 
+            p.id === paymentId ? { ...p, status: 'REJECTED', rejectionReason: reason } : p
+        );
+
+        await updateTaskFields(taskId, { materialsPayments: updatedPayments });
+        
+        // Instant UI Update
+        setTasks(prev => prev.map(t => t.id === taskId ? { ...t, materialsPayments: updatedPayments } : t));
+        setSelectedTask(prev => prev && prev.id === taskId ? { ...prev, materialsPayments: updatedPayments } : prev);
+
+        const targetProviderId = task.acceptedProviderId || task.offers?.find(o => o.id === task.acceptedOfferId)?.providerId;
+        if (targetProviderId) {
+            await sendNotification({
+                userId: targetProviderId,
+                type: 'SYSTEM',
+                title: 'Заявката за материали е отказана',
+                message: `Клиентът отказа вашата заявка за материали на стойност ${payment.amount} €. Причина: ${reason}`,
+                taskId: taskId,
+                isRead: false,
+                createdAt: Date.now()
+            });
+        }
+    };
+
+    const handleExtensionRequest = async (taskId: string, newDate: string, reason: string) => {
+        if (!currentUser) return;
+        const task = tasks.find(t => t.id === taskId);
+        if (!task) return;
+
+        const request = {
+            id: Date.now().toString(),
+            newDate,
+            reason,
+            status: 'PENDING',
+            createdAt: Date.now()
+        };
+
+        await updateTaskFields(taskId, {
+            extensionRequests: arrayUnion(request)
+        });
+
+        await sendNotification({
+            userId: task.requesterId,
+            type: 'SYSTEM',
+            title: 'Заявка за удължаване',
+            message: `Изпълнителят иска удължаване до ${new Date(newDate).toLocaleDateString('bg-BG')}. Причина: ${reason}`,
+            taskId: taskId,
+            isRead: false,
+            createdAt: Date.now()
+        });
+    };
+
+    const handleHandleExtension = async (taskId: string, requestId: string, action: 'ACCEPT' | 'REJECT', reason?: string) => {
+        const task = tasks.find(t => t.id === taskId);
+        const request = task?.extensionRequests?.find(r => r.id === requestId);
+        if (!task || !request) return;
+
+        const updatedRequests = task.extensionRequests?.map(r => 
+            r.id === requestId ? { ...r, status: action === 'ACCEPT' ? 'APPROVED' : 'REJECTED', rejectionReason: reason } : r
+        );
+
+        const fields: any = { extensionRequests: updatedRequests };
+        if (action === 'ACCEPT') {
+            fields.startDate = request.newDate; // Update the task's active date
+        }
+
+        await updateTaskFields(taskId, fields);
+        
+        // Instant UI Update
+        setTasks(prev => prev.map(t => t.id === taskId ? { ...t, ...fields } : t));
+        setSelectedTask(prev => prev && prev.id === taskId ? { ...prev, ...fields } : prev);
+
+        const targetProviderId = task.acceptedProviderId;
+        if (targetProviderId) {
+            await sendNotification({
+                userId: targetProviderId,
+                type: 'SYSTEM',
+                title: action === 'ACCEPT' ? 'Удължаването е одобрено' : 'Удължаването е отказано',
+                message: action === 'ACCEPT' 
+                    ? `Клиентът прие новата дата: ${new Date(request.newDate).toLocaleDateString('bg-BG')}`
+                    : `Клиентът отказа вашето искане за удължаване. Причина: ${reason || 'Не е посочена'}`,
+                taskId: taskId,
+                isRead: false,
+                createdAt: Date.now()
+            });
+        }
+    };
+
+    const handleReportCircumstance = async (taskId: string, description: string, extraPrice?: number, extraTime?: string) => {
+        if (!currentUser) return;
+        const task = tasks.find(t => t.id === taskId);
+        if (!task) return;
+
+        const circumstance: any = {
+            id: Date.now().toString(),
+            description,
+            status: 'PENDING',
+            createdAt: Date.now()
+        };
+        if (extraPrice) circumstance.requestedPrice = extraPrice;
+        if (extraTime) circumstance.requestedExtension = extraTime;
+
+        await updateTaskFields(taskId, {
+            circumstances: arrayUnion(circumstance)
+        });
+
+        await sendNotification({
+            userId: task.requesterId,
+            type: 'SYSTEM',
+            title: 'Непредвидено обстоятелство',
+            message: `Изпълнителят докладва проблем: "${description}"` + (extraPrice ? ` и иска +${extraPrice} €` : ''),
+            taskId: taskId,
+            isRead: false,
+            createdAt: Date.now()
+        });
+    };
+
+    const handleHandleCircumstance = async (taskId: string, circumstanceId: string, action: 'ACCEPT' | 'REJECT', reason?: string) => {
+        const task = tasks.find(t => t.id === taskId);
+        const circ = task?.circumstances?.find(c => c.id === circumstanceId);
+        if (!task || !circ) return;
+
+        if (action === 'ACCEPT' && circ.requestedPrice) {
+            // Need to pay additional funds to escrow
+            try {
+                const intent = await stripeService.createAdditionalFundsIntent(circ.requestedPrice, taskId, circumstanceId);
+                if (intent.clientSecret) {
+                    setPendingPaymentTaskId(taskId);
+                    setPendingCircumstanceId(circumstanceId);
+                    setPaymentAmount(circ.requestedPrice);
+                    setPaymentType('ADDITIONAL');
+                    setStripeClientSecret(intent.clientSecret);
+                    setPaymentIntentId(intent.paymentIntentId || null);
+                    setIsPaymentModalOpen(true);
+                    return; // Backend will update status after payment inside handlePaymentSuccess
+                }
+            } catch (e: any) {
+                alert(`Грешка: ${e.message}`);
+                return;
+            }
+        }
+
+        const updatedCircs = task.circumstances?.map(c => 
+            c.id === circumstanceId ? { ...c, status: action === 'ACCEPT' ? 'APPROVED' : 'REJECTED', rejectionReason: reason } : c
+        );
+
+        const fields: any = { circumstances: updatedCircs };
+        if (action === 'ACCEPT' && circ.requestedExtension) {
+            fields.startDate = circ.requestedExtension;
+        }
+
+        await updateTaskFields(taskId, fields);
+        
+        // Instant UI Update
+        setTasks(prev => prev.map(t => t.id === taskId ? { ...t, ...fields } : t));
+        setSelectedTask(prev => prev && prev.id === taskId ? { ...prev, ...fields } : prev);
+        
+        const targetProviderId = task.acceptedProviderId;
+        if (targetProviderId) {
+            await sendNotification({
+                userId: targetProviderId,
+                type: 'SYSTEM',
+                title: action === 'ACCEPT' ? 'Обстоятелството е прието' : 'Обстоятелството е отхвърлено',
+                message: action === 'ACCEPT' ? 'Клиентът одобри промените.' : `Клиентът не прие предложените промени. Причина: ${reason || 'Не е посочена'}`,
+                taskId: taskId,
+                isRead: false,
+                createdAt: Date.now()
+            });
+        }
+    };
+
+    const handleMutualCancel = async (taskId: string, reason?: string) => {
+        const task = tasks.find(t => t.id === taskId) || (selectedTask?.id === taskId ? selectedTask : null);
+        if (!task || !currentUser) return;
+
+        const isRequester = task.requesterId === currentUser.id;
+        const field = isRequester ? 'requesterAgreedCancel' : 'providerAgreedCancel';
+        
+        const update: any = { 
+            [field]: true,
+            cancelReason: reason || task.cancelReason,
+            cancelInitiatedBy: task.cancelInitiatedBy || currentUser.id
+        };
+        
+        const bothAgreed = (isRequester && task.providerAgreedCancel) || (!isRequester && task.requesterAgreedCancel);
+        
+        // If both agreed now
+        if (bothAgreed) {
+            try {
+                if (task.paymentIntentId) {
+                    await stripeService.refundTaskEscrow(task.paymentIntentId, undefined, taskId);
+                }
+                
+                // RESET TASK TO OPEN
+                update.status = TaskStatus.OPEN;
+                update.acceptedOfferId = null;
+                update.acceptedProviderId = null;
+                update.acceptedProviderName = null;
+                update.acceptedProviderAvatar = null;
+                update.acceptedPrice = null;
+                update.acceptedAt = null;
+                update.paymentIntentId = null;
+                update.requesterAgreedCancel = null;
+                update.providerAgreedCancel = null;
+                update.cancelReason = null;
+                update.cancelInitiatedBy = null;
+                update.onMyWay = false;
+                
+            } catch (e: any) {
+                alert(`Грешка при анулиране: ${e.message}`);
+                return;
+            }
+        }
+
+        await updateTaskFields(taskId, update);
+
+        // Find the other user more reliably
+        const offer = task.offers?.find(o => o.id === task.acceptedOfferId);
+        const otherUserId = isRequester ? offer?.providerId : task.requesterId;
+
+        if (otherUserId) {
+            if (bothAgreed) {
+                await sendNotification({
+                    userId: otherUserId,
+                    type: 'SYSTEM',
+                    title: 'Задачата е анулирана',
+                    message: `Двете страни потвърдиха анулирането на "${task.title}".`,
+                    taskId: taskId,
+                    isRead: false,
+                    createdAt: Date.now()
+                });
+            } else {
+                await sendNotification({
+                    userId: otherUserId,
+                    type: 'SYSTEM',
+                    title: 'Запитване за анулиране',
+                    message: `${currentUser.name} иска взаимно анулиране: "${reason || task.cancelReason}"`,
+                    taskId: taskId,
+                    isRead: false,
+                    createdAt: Date.now()
+                });
+            }
+        }
+    };
+
+    const handleReportProblem = async (taskId: string, reason: string) => {
+        if (!currentUser) return;
+        const task = tasks.find(t => t.id === taskId);
+        if (!task) return;
+
+        await updateTaskFields(taskId, {
+            reportedByRequester: true,
+            reportReason: reason,
+            reportCreatedAt: Date.now(),
+            status: TaskStatus.DISPUTED
+        });
+
+        // Notify Admin (we'll find admins and notify them)
+        const allUsers = await getAllUsers();
+        const admins = allUsers.filter(u => u.isAdmin);
+        
+        for (const admin of admins) {
+            await sendNotification({
+                userId: admin.id,
+                type: 'SYSTEM',
+                title: 'СИГНАЛ ЗА ПРОБЛЕМ',
+                message: `Потребител ${currentUser.name} докладва проблем за задача "${task.title}": ${reason}`,
+                taskId: taskId,
+                isRead: false,
+                createdAt: Date.now()
+            });
+        }
+
+        alert("Сигналът е изпратен до администратор. Ще бъдете информирани за решението.");
+    };
+
+
+    const getLiveUserRating = (userId: string) => {
+        // If we have it in cache, use the real rating from user document
+        if (profilesCache[userId]) {
+            return { 
+                average: profilesCache[userId].rating || 0, 
+                count: profilesCache[userId].reviewCount || 0 
+            };
+        }
+
+        // Fallback to existing logic using tasks reviews
         let totalRating = 0;
         let count = 0;
         tasks.forEach(task => {
             if (task.reviews) {
                 task.reviews.forEach(review => {
-                    if (review.toUserId === providerId) {
+                    if (review.toUserId === userId) {
                         totalRating += review.rating;
                         count++;
                     }
@@ -903,6 +1520,14 @@ const AppContent: React.FC = () => {
             }
             return task;
         });
+
+        // Mark as viewed
+        setViewedTaskIds(prev => {
+            if (prev.has(task.id)) return prev;
+            const next = new Set(prev);
+            next.add(task.id);
+            return next;
+        });
     };
 
     const handleNotificationClick = async (notif: Notification) => {
@@ -915,8 +1540,13 @@ const AppContent: React.FC = () => {
 
     const processedTasks = useMemo(() => {
         let result = tasks.filter(task => {
-            const matchesSearch = task.title.toLowerCase().includes(searchQuery.toLowerCase()) ||
-                task.description.toLowerCase().includes(searchQuery.toLowerCase());
+            const title = task.title || "";
+            const desc = task.description || "";
+            const search = searchQuery.toLowerCase();
+            
+            const matchesSearch = title.toLowerCase().includes(search) ||
+                desc.toLowerCase().includes(search);
+            
             const matchesCategory = selectedCategory === 'Всички' || task.category === selectedCategory;
             const matchesCity = cityFilter ? (task.address?.toLowerCase().includes(cityFilter.toLowerCase()) || false) : true;
             const matchesStatus = task.status === TaskStatus.OPEN;
@@ -1305,6 +1935,8 @@ const AppContent: React.FC = () => {
                                                     distanceKm={userLocation ? calculateDistance(userLocation[0], userLocation[1], task.location.lat, task.location.lng) : null}
                                                     onClick={() => handleTaskClick(task)}
                                                     onOfferClick={(e) => { e.stopPropagation(); handleTaskClick(task); }}
+                                                    isViewed={viewedTaskIds.has(task.id)}
+                                                    getUserRating={getLiveUserRating}
                                                 />
                                             </div>
                                         ))
@@ -1388,7 +2020,7 @@ const AppContent: React.FC = () => {
                         onProviderSubmitWork={handleProviderSubmitWork}
                         onRequesterApproveWork={handleRequesterApproveWork}
                         onRaiseDispute={handleRaiseDispute}
-                        getProviderRating={getProviderRating}
+                        getProviderRating={getLiveUserRating}
                         onUserClick={handleUserClick}
                         onAuthRequest={() => setIsAuthModalOpen(true)}
                         onDeleteTask={handleDeleteTask}
@@ -1403,6 +2035,15 @@ const AppContent: React.FC = () => {
                                 setIsAuthModalOpen(true);
                             }
                         }}
+                        onMaterialsRequest={handleMaterialsRequest}
+                        onPayMaterials={handlePayMaterials}
+                        onRejectMaterials={handleRejectMaterials}
+                        onExtensionRequest={handleExtensionRequest}
+                        onHandleExtension={handleHandleExtension}
+                        onReportCircumstance={handleReportCircumstance}
+                        onHandleCircumstance={handleHandleCircumstance}
+                        onMutualCancel={handleMutualCancel}
+                        onReportProblem={handleReportProblem}
                     />
                 </>
             )}
@@ -1461,11 +2102,13 @@ const AppContent: React.FC = () => {
                 onClose={() => {
                     setIsPaymentModalOpen(false);
                     setPendingPaymentTaskId(null);
+                    setPendingMaterialsPaymentId(null);
                     setStripeClientSecret(null);
                 }}
                 clientSecret={stripeClientSecret}
                 amountEuro={paymentAmount}
                 onSuccess={handlePaymentSuccess}
+                subtitle={paymentType === 'MATERIALS' ? 'Директен превод към изпълнителя за материали' : undefined}
             />
         </div>
     );

@@ -96,11 +96,23 @@ export const LocationPickerModal: React.FC<LocationPickerModalProps> = ({
           const response = await fetch(`https://nominatim.openstreetmap.org/reverse?format=json&lat=${lat}&lon=${lng}&zoom=18&addressdetails=1`);
           const data = await response.json();
           if (data && data.display_name) {
-              // Format shorter address
-              const parts = data.display_name.split(',');
-              const shortAddr = parts.slice(0, 3).join(', ');
-              setAddress(shortAddr);
-              setSearchQuery(shortAddr); 
+              const addr = data.address || {};
+              const road = addr.road || addr.pedestrian || addr.footway || addr.cycleway || addr.path || addr.street;
+              const num = addr.house_number;
+              const quarter = addr.suburb || addr.neighbourhood || addr.city_district || addr.quarter || addr.hamlet;
+              const city = addr.city || addr.town || addr.village;
+
+              let parts = [];
+              if (road) parts.push(num ? `${road} ${num}` : road);
+              if (quarter) parts.push(quarter);
+              if (city) parts.push(city);
+
+              const formattedAddr = parts.length > 0 
+                  ? parts.join(', ') 
+                  : data.display_name.split(',').slice(0, 3).join(', ');
+
+              setAddress(formattedAddr);
+              setSearchQuery(formattedAddr); 
           }
       } catch (e) {
           setAddress(`${lat.toFixed(5)}, ${lng.toFixed(5)}`);

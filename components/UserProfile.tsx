@@ -1,12 +1,14 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { AppUser, Task, TaskStatus, Review } from '../types';
-import { X, Star, Settings, Wallet, CreditCard, Check, Loader2, Building2, LogOut, Camera, ChevronRight, Calendar, ShieldCheck, Briefcase, MapPin, Grid, Heart, Clock, ArrowRight, Layout, Zap, Edit2, ExternalLink, Award, TrendingUp, Bell, User as UserIcon, Tag, Sparkles, AlertCircle, Link } from 'lucide-react';
+import { X, Star, Settings, Wallet, CreditCard, Check, Loader2, Building2, LogOut, Camera, ChevronRight, Calendar, ShieldCheck, Briefcase, MapPin, Grid, Heart, Clock, ArrowRight, Layout, Zap, Edit2, ExternalLink, Award, TrendingUp, Bell, User as UserIcon, Tag, Sparkles, AlertCircle, AlertTriangle, Link, DollarSign, Hammer, Info, XCircle } from 'lucide-react';
 import { StarRating } from './StarRating';
 import { updateUserProfile } from '../services/authService';
 import { CATEGORIES_LIST } from '../constants';
 import { useLanguage } from '../contexts/LanguageContext';
 import { stripeService } from '../services/stripeService';
 import { subscribeToUserReviews, fetchTasksByUser } from '../services/dataService';
+import { db } from '../firebase';
+import { doc, updateDoc, deleteField } from 'firebase/firestore';
 
 interface UserProfileProps {
   user: AppUser;
@@ -44,26 +46,41 @@ export const UserProfile: React.FC<UserProfileProps> = ({
   // Stripe State
   const [isConnectingStripe, setIsConnectingStripe] = useState(false);
   const [stripeBusinessType, setStripeBusinessType] = useState<'individual' | 'company'>('individual');
+  const [stripeCompanyName, setStripeCompanyName] = useState('');
+  const [stripeTaxId, setStripeTaxId] = useState('');
   const [isStripeLoading, setIsStripeLoading] = useState(false);
-  const [stripeBalance, setStripeBalance] = useState<{ available: number; pending: number } | null>(null);
+  const [individualBalance, setIndividualBalance] = useState<{ available: number; pending: number } | null>(null);
+  const [companyBalance, setCompanyBalance] = useState<{ available: number; pending: number } | null>(null);
+  const [individualTransactions, setIndividualTransactions] = useState<any[]>([]);
+  const [companyTransactions, setCompanyTransactions] = useState<any[]>([]);
   const [userReviews, setUserReviews] = useState<Review[]>([]);
   const [userTasks, setUserTasks] = useState<Task[]>([]);
   const [isLoadingTasks, setIsLoadingTasks] = useState(false);
 
-  // Fetch real Stripe balance when finances tab is opened
+  // Fetch real Stripe balances
   useEffect(() => {
-    if (activeTab === 'FINANCES' && isCurrentUserProfile && user.stripeAccountId) {
-      const fetchBalance = async () => {
+    if (activeTab === 'FINANCES' && isCurrentUserProfile) {
+      const fetchBalances = async () => {
         try {
-          const balance = await stripeService.getStripeBalance(user.id);
-          setStripeBalance(balance);
+          if (user.stripeAccountId_individual || user.stripeAccountId) {
+            const bal = await stripeService.getStripeBalance(user.id, 'individual');
+            setIndividualBalance(bal);
+            const txs = await stripeService.getStripeTransactions(user.id, 'individual');
+            setIndividualTransactions(txs);
+          }
+          if (user.stripeAccountId_company) {
+            const bal = await stripeService.getStripeBalance(user.id, 'company');
+            setCompanyBalance(bal);
+            const txs = await stripeService.getStripeTransactions(user.id, 'company');
+            setCompanyTransactions(txs);
+          }
         } catch (error) {
-          console.error("Failed to fetch Stripe balance:", error);
+          console.error("Failed to fetch Stripe data:", error);
         }
       };
-      fetchBalance();
+      fetchBalances();
     }
-  }, [activeTab, isCurrentUserProfile, user.id, user.stripeAccountId]);
+  }, [activeTab, isCurrentUserProfile, user.id, user.stripeAccountId_individual, user.stripeAccountId_company, user.stripeAccountId]);
 
   // Subscribe to user reviews and fetch user tasks
   useEffect(() => {
@@ -219,11 +236,25 @@ export const UserProfile: React.FC<UserProfileProps> = ({
       }
   };
 
-  const handleConnectStripe = async () => {
+  const handleConnectStripe = async (type: 'individual' | 'company') => {
+      if (!user.id) return;
+      
+      // Basic validation for company
+      if (type === 'company' && !stripeCompanyName) {
+          alert("Моля въведете име на фирмата.");
+          return;
+      }
+
       setIsStripeLoading(true);
       try {
-          const url = await stripeService.createStripeAccount(user.id, stripeBusinessType);
-          window.location.href = url;
+          const url = await stripeService.createStripeAccount(
+              user.id, 
+              type,
+              type === 'company' ? stripeCompanyName : undefined,
+              type === 'company' ? stripeTaxId : undefined
+          );
+          // Use window.top to ensure we break out of any potential frames/modals
+          window.top.location.href = url;
       } catch (error) {
           console.error("Stripe Connection Error:", error);
           alert("Грешка при свързване със Stripe. Моля опитайте пак.");
@@ -232,32 +263,31 @@ export const UserProfile: React.FC<UserProfileProps> = ({
       }
   };
 
-  const handleRefreshStripeStatus = async () => {
+  const handleRefreshStripeStatus = async (type: 'individual' | 'company') => {
+      if (!user.id) return;
       setIsStripeLoading(true);
       try {
-          const result = await stripeService.checkStripeStatus(user.id);
+          const result = await stripeService.checkStripeStatus(user.id, type);
           if (result.onboardingComplete) {
-              if (onUserUpdate) onUserUpdate({ stripeOnboardingComplete: true });
-              alert("Акаунтът е свързан успешно!");
+              alert(`Успешно свързване като ${type === 'company' ? 'фирма' : 'физическо лице'}!`);
           } else {
               alert("Акаунтът все още не е напълно конфигуриран в Stripe. Моля довършете всички стъпки там.");
           }
       } catch (error) {
-          console.error("Refresh Stripe Status Error:", error);
-          alert("Грешка при проверката. Моля опитайте пак.");
+          console.error("Status check failed:", error);
       } finally {
           setIsStripeLoading(false);
       }
   };
 
-  const handleOpenStripeDashboard = async () => {
+  const handleOpenStripeDashboard = async (type: 'individual' | 'company') => {
+      if (!user.id) return;
       setIsStripeLoading(true);
       try {
           const url = await stripeService.createStripeLoginLink(user.id);
           window.open(url, '_blank');
       } catch (error) {
-          console.error("Dashboard Link Error:", error);
-          alert("Грешка при отваряне на таблото. Моля опитайте пак.");
+          console.error("Failed to open dashboard:", error);
       } finally {
           setIsStripeLoading(false);
       }
@@ -266,6 +296,27 @@ export const UserProfile: React.FC<UserProfileProps> = ({
   const getAvatar = (url?: string) => {
     if (!url || url.includes('dicebear')) return DEFAULT_AVATAR;
     return url;
+  };
+
+  const handleResetStripe = async () => {
+    if (!window.confirm("Сигурни ли сте, че искате да изчистите Stripe данните си? Това ще прекъсне текущата връзка и ще ви позволи да се регистрирате наново.")) return;
+    
+    try {
+      const userRef = doc(db, 'users', user.id);
+      await updateDoc(userRef, {
+        stripeAccountId: deleteField(),
+        stripeOnboardingComplete: deleteField(),
+        stripeAccountId_individual: deleteField(),
+        stripeOnboardingComplete_individual: deleteField(),
+        stripeAccountId_company: deleteField(),
+        stripeOnboardingComplete_company: deleteField()
+      });
+      alert("Stripe данните бяха изчистени успешно! Моля, опреснете страницата.");
+      window.location.reload();
+    } catch (error) {
+      console.error("Reset Stripe failed", error);
+      alert("Неуспешно изчистване на данните.");
+    }
   };
 
   const tabs = [
@@ -496,31 +547,35 @@ export const UserProfile: React.FC<UserProfileProps> = ({
 
                     {/* --- CREATED TASKS --- */}
                     {activeTab === 'CREATED' && (
-                        <div className="grid grid-cols-1 md:grid-cols-2 gap-4 animate-in fade-in slide-in-from-bottom-4 duration-500">
+                        <div className="grid grid-cols-2 lg:grid-cols-3 gap-4 animate-in fade-in slide-in-from-bottom-4 duration-500">
                             {createdTasks.length === 0 && (
-                                <EmptyState icon={<Briefcase size={32} />} title={t('profile_empty_created')} sub={t('profile_empty_created_sub')} />
+                                <div className="col-span-full">
+                                    <EmptyState icon={<Briefcase size={32} />} title={t('profile_empty_created')} sub={t('profile_empty_created_sub')} />
+                                </div>
                             )}
                             {createdTasks.map(task => (
                                 <div 
                                     key={task.id} 
                                     onClick={() => onTaskClick(task)} 
-                                    className="bg-white p-3 rounded-[24px] shadow-sm hover:shadow-lg transition-all duration-300 cursor-pointer group active:scale-[0.98]"
+                                    className="bg-white p-2 rounded-[32px] shadow-sm hover:shadow-xl transition-all duration-300 cursor-pointer group active:scale-[0.98] border border-slate-100 flex flex-col h-full"
                                 >
-                                    <div className="relative aspect-[16/9] rounded-[20px] overflow-hidden bg-slate-100 mb-3">
-                                        <img src={task.imageUrl || fallbackImage} className="w-full h-full object-cover" alt="" />
+                                    <div className="relative aspect-square rounded-[24px] overflow-hidden bg-slate-100 mb-3 shrink-0">
+                                        <img src={task.imageUrl || fallbackImage} className="w-full h-full object-cover group-hover:scale-110 transition-transform duration-700" alt="" />
                                         <div className="absolute top-2 right-2">
                                             <StatusBadge status={task.status} />
                                         </div>
                                         <div className="absolute bottom-2 left-2 right-2">
-                                            <div className="bg-white/90 backdrop-blur-md rounded-xl p-2 shadow-sm flex items-center justify-between">
+                                            <div className="bg-white/90 backdrop-blur-md rounded-xl p-2 shadow-sm flex items-center justify-between border border-white/20">
                                                 <span className="text-[10px] font-bold text-slate-500 flex items-center gap-1"><Calendar size={10} /> {new Date(task.createdAt).toLocaleDateString()}</span>
-                                                <div className="w-6 h-6 rounded-full bg-slate-100 flex items-center justify-center">
-                                                    <ArrowRight size={12} className="text-slate-400" />
+                                                <div className="w-6 h-6 rounded-full bg-slate-900 flex items-center justify-center">
+                                                    <ArrowRight size={12} className="text-white" />
                                                 </div>
                                             </div>
                                         </div>
                                     </div>
-                                    <h4 className="px-1 font-bold text-slate-800 text-sm line-clamp-2 leading-snug">{task.title}</h4>
+                                    <div className="px-2 pb-2">
+                                        <h4 className="font-bold text-slate-800 text-[11px] line-clamp-2 leading-tight uppercase tracking-tight">{task.title}</h4>
+                                    </div>
                                 </div>
                             ))}
                         </div>
@@ -528,31 +583,45 @@ export const UserProfile: React.FC<UserProfileProps> = ({
 
                     {/* --- COMPLETED TASKS --- */}
                     {activeTab === 'COMPLETED' && (
-                        <div className="space-y-4 animate-in fade-in slide-in-from-bottom-4 duration-500">
+                        <div className="grid grid-cols-2 lg:grid-cols-3 gap-4 animate-in fade-in slide-in-from-bottom-4 duration-500">
                             {completedTasks.length === 0 && (
-                                <EmptyState icon={<Check size={32} />} title={t('profile_empty_completed')} sub={t('profile_empty_completed_sub')} />
+                                <div className="col-span-full">
+                                    <EmptyState icon={<Check size={32} />} title={t('profile_empty_completed')} sub={t('profile_empty_completed_sub')} />
+                                </div>
                             )}
                             {completedTasks.map(task => (
-                                <div key={task.id} onClick={() => onTaskClick(task)} className="bg-white p-5 rounded-[28px] shadow-sm active:scale-[0.98] transition-transform cursor-pointer relative overflow-hidden group">
-                                    <div className="flex justify-between items-start relative z-10">
-                                        <div className="flex-1">
-                                            <h4 className="font-bold text-slate-900 text-lg mb-1">{task.title}</h4>
-                                            <p className="text-xs text-slate-500 font-medium bg-[#F2F2F7] px-2 py-1 rounded-lg w-fit inline-block">
-                                                За клиент: <span className="text-slate-900 font-bold">{task.requesterName}</span>
-                                            </p>
+                                <div 
+                                    key={task.id} 
+                                    onClick={() => onTaskClick(task)} 
+                                    className="bg-white rounded-[32px] p-2 shadow-sm hover:shadow-xl transition-all duration-300 cursor-pointer group active:scale-[0.98] border border-slate-100 flex flex-col h-full"
+                                >
+                                    <div className="relative aspect-square rounded-[24px] overflow-hidden bg-slate-100 mb-3 shrink-0">
+                                        <img src={task.completionImageUrl || task.imageUrl || fallbackImage} className="w-full h-full object-cover group-hover:scale-110 transition-transform duration-700" alt="" />
+                                        <div className="absolute top-2 right-2 z-10">
+                                            <div className="bg-emerald-500 text-white p-1.5 rounded-xl shadow-lg shadow-emerald-500/30">
+                                                <Check size={14} strokeWidth={4} />
+                                            </div>
                                         </div>
-                                        <div className="w-10 h-10 rounded-full bg-green-100 flex items-center justify-center text-green-600 shadow-sm shrink-0">
-                                            <Check size={20} strokeWidth={3} />
+                                        <div className="absolute bottom-2 left-2 right-2">
+                                            <div className="bg-white/90 backdrop-blur-md rounded-xl p-2 shadow-sm flex items-center justify-between border border-white/20">
+                                                <span className="text-[9px] font-black text-slate-800 uppercase truncate pr-1">
+                                                    {task.acceptedPrice ? `${task.acceptedPrice}€` : 'Done'}
+                                                </span>
+                                                <div className="w-5 h-5 rounded-full bg-emerald-500 flex items-center justify-center">
+                                                    <ArrowRight size={10} className="text-white" />
+                                                </div>
+                                            </div>
                                         </div>
                                     </div>
-                                    {task.completionImageUrl && (
-                                        <div className="mt-4 relative h-32 rounded-xl overflow-hidden bg-slate-100">
-                                             <img src={task.completionImageUrl} className="w-full h-full object-cover opacity-80 group-hover:opacity-100 transition-opacity" alt="Completed" />
-                                             <div className="absolute bottom-2 right-2 bg-black/60 text-white text-[9px] font-bold px-2 py-1 rounded-lg backdrop-blur-md">
-                                                 РЕЗУЛТАТ
-                                             </div>
+                                    <div className="px-2 pb-2 flex-1 flex flex-col">
+                                        <h4 className="font-bold text-slate-800 text-[11px] line-clamp-2 leading-tight mb-2 uppercase tracking-tight">{task.title}</h4>
+                                        <div className="mt-auto flex items-center gap-1.5 pt-2 border-t border-slate-50">
+                                            <div className="w-4 h-4 rounded-full bg-slate-100 flex items-center justify-center text-[8px] font-black text-slate-500">
+                                                {task.requesterName.charAt(0)}
+                                            </div>
+                                            <span className="text-[9px] font-bold text-slate-400 truncate">за {task.requesterName}</span>
                                         </div>
-                                    )}
+                                    </div>
                                 </div>
                             ))}
                         </div>
@@ -561,43 +630,66 @@ export const UserProfile: React.FC<UserProfileProps> = ({
                     {/* --- REVIEWS --- */}
                     {activeTab === 'REVIEWS' && (
                         <div className="animate-in fade-in slide-in-from-bottom-4 duration-500">
-                            <div className="bg-[#E5E5EA] p-1 rounded-xl flex mb-6 mx-auto max-w-sm">
-                                <button onClick={() => setReviewRole('PROVIDER')} className={`flex-1 py-2 text-xs font-bold rounded-lg transition-all ${reviewRole === 'PROVIDER' ? 'bg-white shadow-sm text-black' : 'text-slate-500'}`}>
+                            <div className="flex bg-slate-100 p-1 rounded-xl mb-6 w-fit mx-auto">
+                                <button 
+                                    onClick={() => setReviewRole('PROVIDER')}
+                                    className={`px-4 py-2 rounded-lg text-xs font-bold transition-all ${reviewRole === 'PROVIDER' ? 'bg-white text-indigo-600 shadow-sm' : 'text-slate-500'}`}
+                                >
                                     {t('profile_reviews_provider')}
                                 </button>
-                                <button onClick={() => setReviewRole('REQUESTER')} className={`flex-1 py-2 text-xs font-bold rounded-lg transition-all ${reviewRole === 'REQUESTER' ? 'bg-white shadow-sm text-black' : 'text-slate-500'}`}>
+                                <button 
+                                    onClick={() => setReviewRole('REQUESTER')}
+                                    className={`px-4 py-2 rounded-lg text-xs font-bold transition-all ${reviewRole === 'REQUESTER' ? 'bg-white text-indigo-600 shadow-sm' : 'text-slate-500'}`}
+                                >
                                     {t('profile_reviews_requester')}
                                 </button>
                             </div>
 
-                            <div className="space-y-4">
+                            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                                 {(reviewRole === 'PROVIDER' ? providerReviews : requesterReviews).length === 0 && (
-                                    <EmptyState icon={<Star size={32} />} title="Няма отзиви" sub="Все още няма оставени мнения." />
+                                    <div className="col-span-full">
+                                        <EmptyState icon={<Star size={32} />} title="Няма отзиви" sub="Все още няма оставени мнения." />
+                                    </div>
                                 )}
                                 {(reviewRole === 'PROVIDER' ? providerReviews : requesterReviews).map(review => (
-                                    <div key={review.id} onClick={() => review.taskContext && onTaskClick(review.taskContext)} className="bg-white/40 backdrop-blur-md p-5 rounded-[24px] border border-white/40 shadow-sm active:scale-[0.98] transition-transform cursor-pointer">
-                                        <div className="flex justify-between items-start mb-3">
+                                    <div key={review.id} onClick={() => review.taskContext && onTaskClick(review.taskContext)} className="bg-white rounded-[32px] p-5 border border-slate-100 shadow-sm hover:shadow-xl transition-all duration-300 cursor-pointer group flex flex-col">
+                                        <div className="flex justify-between items-start mb-4">
                                             <div className="flex items-center gap-3">
-                                                <div className="w-10 h-10 rounded-full bg-gradient-to-br from-indigo-100 to-purple-100 flex items-center justify-center text-indigo-600 font-black">
-                                                    {review.fromUser.charAt(0)}
+                                                <div className="relative">
+                                                    <div className="w-12 h-12 rounded-2xl bg-gradient-to-br from-indigo-500 to-purple-500 flex items-center justify-center text-white font-black text-lg shadow-lg shadow-indigo-200">
+                                                        {review.fromUser.charAt(0)}
+                                                    </div>
+                                                    <div className="absolute -bottom-1 -right-1 bg-white p-1 rounded-lg shadow-md border border-slate-50">
+                                                        <Star size={10} className="text-amber-400 fill-amber-400" />
+                                                    </div>
                                                 </div>
                                                 <div>
-                                                    <p className="font-bold text-slate-900 text-sm">{review.fromUser}</p>
-                                                    <div className="flex items-center gap-1">
-                                                        <StarRating rating={review.rating} size={12} />
+                                                    <p className="font-black text-slate-900 text-sm uppercase tracking-tight">{review.fromUser}</p>
+                                                    <div className="flex items-center gap-1 mt-0.5">
+                                                        <StarRating rating={review.rating} size={10} />
                                                     </div>
                                                 </div>
                                             </div>
-                                            <span className="text-[10px] text-slate-400 font-bold bg-[#F2F2F7] px-2 py-1 rounded-lg">
+                                            <span className="text-[9px] text-slate-400 font-black bg-slate-50 px-2 py-1 rounded-lg border border-slate-100">
                                                 {new Date(review.createdAt).toLocaleDateString()}
                                             </span>
                                         </div>
-                                        <div className="bg-[#F2F2F7] p-3 rounded-2xl text-xs text-slate-700 italic leading-relaxed mb-3">
-                                            "{review.comment}"
+                                        
+                                        <div className="flex-1 bg-slate-50/50 rounded-[24px] p-4 border border-slate-100/50 mb-4 relative group-hover:bg-indigo-50/30 transition-colors">
+                                            <p className="text-xs text-slate-700 italic leading-relaxed">
+                                                "{review.comment}"
+                                            </p>
+                                            <Sparkles size={16} className="absolute -top-2 -right-2 text-indigo-200 opacity-0 group-hover:opacity-100 transition-opacity" />
                                         </div>
-                                        <div className="flex items-center gap-1.5 text-[10px] font-bold text-slate-400 uppercase tracking-wide">
-                                            <Briefcase size={12} />
-                                            <span className="truncate">{review.taskContext?.title || "Изтрита задача"}</span>
+
+                                        <div className="flex items-center justify-between pt-2 border-t border-slate-50 mt-auto">
+                                            <div className="flex items-center gap-1.5 text-[9px] font-black text-slate-400 uppercase tracking-widest">
+                                                <Briefcase size={12} className="text-indigo-400" />
+                                                <span className="truncate max-w-[120px]">{review.taskContext?.title || "Задача"}</span>
+                                            </div>
+                                            <div className="w-6 h-6 rounded-lg bg-slate-100 flex items-center justify-center group-hover:bg-indigo-600 group-hover:text-white transition-all">
+                                                <ArrowRight size={12} />
+                                            </div>
                                         </div>
                                     </div>
                                 ))}
@@ -625,16 +717,16 @@ export const UserProfile: React.FC<UserProfileProps> = ({
                                     <p className="text-white/60 text-[10px] font-bold uppercase tracking-widest mb-1">Available for Payout</p>
                                     <div className="flex items-baseline gap-1 mb-4">
                                         <span className="text-5xl font-black tracking-tight">
-                                            {stripeBalance ? stripeBalance.available.toFixed(2) : totalEarnings.toFixed(2)}
+                                            {((individualBalance?.available || 0) + (companyBalance?.available || 0) || totalEarnings).toFixed(2)}
                                         </span>
                                         <span className="text-xl font-bold text-blue-400">EUR</span>
                                     </div>
 
-                                    {stripeBalance && stripeBalance.pending > 0 && (
+                                    {((individualBalance?.pending || 0) + (companyBalance?.pending || 0)) > 0 && (
                                         <div className="flex items-center gap-2 bg-white/5 backdrop-blur-md px-3 py-1.5 rounded-xl border border-white/10 w-fit">
                                             <div className="w-1.5 h-1.5 rounded-full bg-amber-400 animate-pulse"></div>
                                             <span className="text-[10px] font-bold text-white/70">
-                                                Pending: <span className="text-white">{stripeBalance.pending.toFixed(2)} EUR</span>
+                                                Pending: <span className="text-white">{((individualBalance?.pending || 0) + (companyBalance?.pending || 0)).toFixed(2)} EUR</span>
                                             </span>
                                         </div>
                                     )}
@@ -658,115 +750,166 @@ export const UserProfile: React.FC<UserProfileProps> = ({
                                 </div>
                             </div>
 
-                            {/* Stripe Onboarding Section */}
-                            {!user.stripeOnboardingComplete ? (
-                                <div className="bg-white rounded-[24px] p-6 border border-slate-200 shadow-sm relative overflow-hidden">
-                                    <div className="absolute top-0 right-0 w-32 h-32 bg-indigo-500/5 rounded-full -mr-10 -mt-10"></div>
-                                    
-                                    <div className="relative z-10 text-center">
-                                        <div className="w-16 h-16 mx-auto bg-[#635BFF]/10 rounded-2xl flex items-center justify-center mb-4">
-                                            <CreditCard size={32} className="text-[#635BFF]" />
-                                        </div>
-                                        
-                                        <h3 className="text-lg font-black text-slate-900 mb-2">Свържи банкова сметка</h3>
-                                        <p className="text-xs text-slate-500 leading-relaxed mb-6 max-w-xs mx-auto">
-                                            Използваме <span className="font-bold text-[#635BFF]">Stripe Connect</span> за сигурни и директни преводи към вашата банка. Регистрацията отнема 2 минути.
-                                        </p>
-
-                                        <div className="grid grid-cols-2 gap-3 mb-6">
-                                            <button 
-                                                onClick={() => setStripeBusinessType('individual')}
-                                                className={`flex flex-col items-center gap-2 p-4 rounded-2xl border-2 transition-all ${stripeBusinessType === 'individual' ? 'border-[#635BFF] bg-indigo-50 text-[#635BFF]' : 'border-slate-100 text-slate-500 hover:border-slate-200'}`}
-                                            >
-                                                <UserIcon size={24} />
-                                                <span className="text-[10px] font-black uppercase tracking-wider">Физическо лице</span>
-                                            </button>
-                                            <button 
-                                                onClick={() => setStripeBusinessType('company')}
-                                                className={`flex flex-col items-center gap-2 p-4 rounded-2xl border-2 transition-all ${stripeBusinessType === 'company' ? 'border-[#635BFF] bg-indigo-50 text-[#635BFF]' : 'border-slate-100 text-slate-500 hover:border-slate-200'}`}
-                                            >
-                                                <Building2 size={24} />
-                                                <span className="text-[10px] font-black uppercase tracking-wider">Фирма</span>
-                                            </button>
-                                        </div>
-
-                                        <button 
-                                            onClick={handleConnectStripe}
-                                            disabled={isStripeLoading}
-                                            className="w-full py-4 bg-[#635BFF] hover:bg-[#5851E3] text-white rounded-xl font-bold text-sm shadow-lg shadow-indigo-500/30 active:scale-[0.98] transition-all flex items-center justify-center gap-2 mb-3"
-                                        >
-                                            {isStripeLoading ? <Loader2 size={18} className="animate-spin" /> : (
-                                                <>Свържи се със Stripe <ArrowRight size={18} /></>
-                                            )}
-                                        </button>
-
-                                        <button 
-                                            onClick={handleRefreshStripeStatus}
-                                            disabled={isStripeLoading}
-                                            className="w-full py-2.5 bg-white text-slate-600 border border-slate-200 rounded-xl font-bold text-xs hover:bg-slate-50 transition-all flex items-center justify-center gap-2"
-                                        >
-                                            <Clock size={14} /> Провери статус на свързване
-                                        </button>
-                                        
-                                        <p className="text-[9px] text-slate-400 mt-4 flex items-center justify-center gap-1">
-                                            <ShieldCheck size={10} /> 100% Secure Payments
-                                        </p>
-                                    </div>
-                                </div>
-                            ) : (
+                            <div className="grid grid-cols-1 gap-6">
+                                {/* INDIVIDUAL ACCOUNT CARD */}
                                 <div className="bg-white rounded-[24px] p-6 border border-slate-200 shadow-sm relative overflow-hidden">
                                     <div className="flex justify-between items-center mb-4">
-                                        <h3 className="text-sm font-black text-slate-900 uppercase tracking-wide">Вашият Акаунт</h3>
-                                        <span className="bg-green-100 text-green-700 px-2 py-1 rounded text-[10px] font-bold border border-green-200">ACTIVE</span>
-                                    </div>
-                                    
-                                    <div className="flex items-center gap-3 bg-slate-50 p-4 rounded-xl border border-slate-100 mb-6">
-                                        <div className="w-10 h-10 bg-white rounded-full flex items-center justify-center border border-slate-200 shadow-sm text-slate-400">
-                                            <Building2 size={20} />
+                                        <div className="flex items-center gap-2">
+                                            <UserIcon size={18} className="text-blue-500" />
+                                            <h3 className="text-sm font-black text-slate-900 uppercase tracking-wide">Физическо лице</h3>
                                         </div>
-                                        <div>
-                                            <p className="text-xs font-bold text-slate-900">Stripe Express</p>
-                                            <p className="text-[10px] text-slate-500">Свързан успешно</p>
-                                        </div>
+                                        {user.stripeOnboardingComplete_individual || user.stripeOnboardingComplete ? (
+                                            <span className="bg-green-100 text-green-700 px-2 py-1 rounded text-[10px] font-bold border border-green-200 uppercase">Свързан</span>
+                                        ) : (
+                                            <span className="bg-amber-100 text-amber-700 px-2 py-1 rounded text-[10px] font-bold border border-amber-200 uppercase">Неактивен</span>
+                                        )}
                                     </div>
 
-                                    <button 
-                                        onClick={handleOpenStripeDashboard}
-                                        disabled={isStripeLoading}
-                                        className="w-full py-3 bg-slate-900 text-white rounded-xl font-bold text-xs flex items-center justify-center gap-2 hover:bg-slate-800 transition-colors disabled:opacity-50"
-                                    >
-                                        {isStripeLoading ? <Loader2 size={14} className="animate-spin" /> : (
-                                            <><ExternalLink size={14} /> Към Stripe Табло</>
-                                        )}
-                                    </button>
+                                    {(user.stripeOnboardingComplete_individual || user.stripeOnboardingComplete) ? (
+                                        <div className="space-y-4">
+                                            <div className="flex items-center justify-between bg-slate-50 p-4 rounded-xl border border-slate-100">
+                                                <div>
+                                                    <p className="text-[10px] text-slate-400 font-bold uppercase tracking-widest">Наличен Баланс</p>
+                                                    <p className="text-xl font-black text-slate-900">{individualBalance?.available || 0} €</p>
+                                                </div>
+                                                <div className="text-right">
+                                                    <p className="text-[10px] text-slate-400 font-bold uppercase tracking-widest">В изчакване</p>
+                                                    <p className="text-sm font-bold text-slate-500">{individualBalance?.pending || 0} €</p>
+                                                </div>
+                                            </div>
+                                            <button 
+                                                onClick={() => handleOpenStripeDashboard('individual')}
+                                                className="w-full py-3 bg-slate-900 text-white rounded-xl font-bold text-xs flex items-center justify-center gap-2"
+                                            >
+                                                <ExternalLink size={14} /> Stripe Dashboard (Личен)
+                                            </button>
+                                        </div>
+                                    ) : (
+                                        <div className="text-center">
+                                            <p className="text-xs text-slate-500 mb-4">Кандидатствайте като физическо лице и получавайте плащания директно.</p>
+                                            <button 
+                                                onClick={() => handleConnectStripe('individual')}
+                                                disabled={isStripeLoading}
+                                                className="w-full py-3 bg-[#635BFF] text-white rounded-xl font-bold text-xs flex items-center justify-center gap-2"
+                                            >
+                                                {isStripeLoading ? <Loader2 size={14} className="animate-spin" /> : "Свържи личен акаунт"}
+                                            </button>
+                                            <button 
+                                                onClick={() => handleRefreshStripeStatus('individual')}
+                                                className="w-full mt-2 py-2 text-[10px] font-bold text-slate-400 uppercase hover:text-slate-600 transition-colors"
+                                            >
+                                                Провери статус
+                                            </button>
+                                        </div>
+                                    )}
                                 </div>
-                            )}
+
+                                {/* COMPANY ACCOUNT CARD */}
+                                <div className="bg-white rounded-[24px] p-6 border border-slate-200 shadow-sm relative overflow-hidden">
+                                    <div className="flex justify-between items-center mb-4">
+                                        <div className="flex items-center gap-2">
+                                            <Building2 size={18} className="text-indigo-500" />
+                                            <h3 className="text-sm font-black text-slate-900 uppercase tracking-wide">Фирма</h3>
+                                        </div>
+                                        {user.stripeOnboardingComplete_company ? (
+                                            <span className="bg-green-100 text-green-700 px-2 py-1 rounded text-[10px] font-bold border border-green-200 uppercase">Свързан</span>
+                                        ) : (
+                                            <span className="bg-amber-100 text-amber-700 px-2 py-1 rounded text-[10px] font-bold border border-amber-200 uppercase">Неактивен</span>
+                                        )}
+                                    </div>
+
+                                    {user.stripeOnboardingComplete_company ? (
+                                        <div className="space-y-4">
+                                            <div className="flex items-center justify-between bg-indigo-50/50 p-4 rounded-xl border border-indigo-100/50">
+                                                <div>
+                                                    <p className="text-[10px] text-indigo-400 font-bold uppercase tracking-widest">Баланс Фирма</p>
+                                                    <p className="text-xl font-black text-slate-900">{companyBalance?.available || 0} €</p>
+                                                </div>
+                                                <div className="text-right">
+                                                    <p className="text-[10px] text-indigo-400 font-bold uppercase tracking-widest">В изчакване</p>
+                                                    <p className="text-sm font-bold text-slate-500">{companyBalance?.pending || 0} €</p>
+                                                </div>
+                                            </div>
+                                            <button 
+                                                onClick={() => handleOpenStripeDashboard('company')}
+                                                className="w-full py-3 bg-indigo-900 text-white rounded-xl font-bold text-xs flex items-center justify-center gap-2"
+                                            >
+                                                <ExternalLink size={14} /> Stripe Dashboard (Фирма)
+                                            </button>
+                                        </div>
+                                    ) : (
+                                        <div className="text-center">
+                                            <div className="space-y-3 mb-4">
+                                                <input 
+                                                    type="text"
+                                                    value={stripeCompanyName}
+                                                    onChange={(e) => setStripeCompanyName(e.target.value)}
+                                                    placeholder="Име на фирмата..."
+                                                    className="w-full bg-slate-50 border border-slate-100 rounded-xl px-4 py-2.5 text-xs font-bold text-slate-900 focus:outline-none focus:border-[#635BFF]"
+                                                />
+                                                <input 
+                                                    type="text"
+                                                    value={stripeTaxId}
+                                                    onChange={(e) => setStripeTaxId(e.target.value)}
+                                                    placeholder="ЕИК / Булстат..."
+                                                    className="w-full bg-slate-50 border border-slate-100 rounded-xl px-4 py-2.5 text-xs font-bold text-slate-900 focus:outline-none focus:border-[#635BFF]"
+                                                />
+                                            </div>
+                                            <button 
+                                                onClick={() => handleConnectStripe('company')}
+                                                disabled={isStripeLoading}
+                                                className="w-full py-3 bg-[#635BFF] text-white rounded-xl font-bold text-xs flex items-center justify-center gap-2"
+                                            >
+                                                {isStripeLoading ? <Loader2 size={14} className="animate-spin" /> : "Свържи фирмен акаунт"}
+                                            </button>
+                                            <button 
+                                                onClick={() => handleRefreshStripeStatus('company')}
+                                                className="w-full mt-2 py-2 text-[10px] font-bold text-slate-400 uppercase hover:text-slate-600 transition-colors"
+                                            >
+                                                Провери статус
+                                            </button>
+                                        </div>
+                                    )}
+                                </div>
+                            </div>
                             
-                            {/* Transaction History Placeholder */}
+                            {/* Transaction History */}
                             <div className="mt-8">
-                                <h4 className="text-xs font-bold text-slate-400 uppercase tracking-widest mb-3 ml-2">Последни преводи</h4>
-                                <div className="bg-white rounded-[20px] border border-slate-100 p-1">
-                                    {completedTasks.length > 0 ? (
-                                        completedTasks.slice(0, 3).map(t => {
-                                            const offer = t.offers.find(o => o.id === t.acceptedOfferId);
-                                            return (
-                                                <div key={t.id} className="flex justify-between items-center p-4 border-b border-slate-50 last:border-0 hover:bg-slate-50 rounded-xl transition-colors">
+                                <h4 className="text-xs font-bold text-slate-400 uppercase tracking-widest mb-3 ml-2">Последни транзакции</h4>
+                                <div className="bg-white rounded-[24px] border border-slate-100 overflow-hidden shadow-sm">
+                                    {(individualTransactions.length > 0 || companyTransactions.length > 0) ? (
+                                        <div className="divide-y divide-slate-50">
+                                            {[...individualTransactions, ...companyTransactions]
+                                                .sort((a, b) => b.created - a.created)
+                                                .slice(0, 10)
+                                                .map(tx => (
+                                                <div key={tx.id} className="flex justify-between items-center p-4 hover:bg-slate-50 transition-colors group">
                                                     <div className="flex items-center gap-3">
-                                                        <div className="w-8 h-8 rounded-full bg-green-50 flex items-center justify-center text-green-600">
-                                                            <ArrowRight size={14} className="-rotate-45" />
+                                                        <div className={`w-9 h-9 rounded-full flex items-center justify-center ${tx.amount > 0 ? 'bg-green-50 text-green-600' : 'bg-slate-50 text-slate-400'}`}>
+                                                            {tx.amount > 0 ? <ArrowRight size={16} className="-rotate-45" /> : <Clock size={16} />}
                                                         </div>
                                                         <div>
-                                                            <p className="text-xs font-bold text-slate-900 line-clamp-1">{t.title}</p>
-                                                            <p className="text-[9px] text-slate-400">{new Date(t.submittedAt || t.createdAt).toLocaleDateString()}</p>
+                                                            <p className="text-xs font-bold text-slate-900 group-hover:text-indigo-600 transition-colors line-clamp-1">{tx.description}</p>
+                                                            <p className="text-[9px] text-slate-400 font-medium">
+                                                                {new Date(tx.created * 1000).toLocaleDateString('bg-BG', { day: '2-digit', month: 'long', year: 'numeric' })}
+                                                            </p>
                                                         </div>
                                                     </div>
-                                                    <span className="text-sm font-black text-slate-900">+{offer?.price} €</span>
+                                                    <div className="text-right">
+                                                        <p className={`text-sm font-black ${Number(tx.amount) > 0 ? 'text-emerald-600' : 'text-slate-900'}`}>
+                                                            {Number(tx.amount) > 0 ? '+' : ''}{Number(tx.amount || 0).toFixed(2)} {(tx.currency || 'eur').toUpperCase()}
+                                                        </p>
+                                                        <p className="text-[8px] text-slate-300 font-bold uppercase tracking-widest">{tx.status}</p>
+                                                    </div>
                                                 </div>
-                                            );
-                                        })
+                                            ))}
+                                        </div>
                                     ) : (
-                                        <div className="py-8 text-center text-slate-400 text-xs font-medium">
-                                            Няма скорошни транзакции.
+                                        <div className="py-12 text-center">
+                                            <div className="w-12 h-12 bg-slate-50 rounded-full flex items-center justify-center mx-auto mb-3 text-slate-200">
+                                                <Wallet size={20} />
+                                            </div>
+                                            <p className="text-xs text-slate-400 font-medium">Няма открити скорошни транзакции.</p>
                                         </div>
                                     )}
                                 </div>
@@ -779,24 +922,21 @@ export const UserProfile: React.FC<UserProfileProps> = ({
                     {activeTab === 'SETTINGS' && isCurrentUserProfile && (
                         <div className="animate-in fade-in slide-in-from-bottom-4 duration-500 max-w-lg mx-auto">
                             
-                            {/* Business Toggle - List Group */}
-                            <h3 className="text-xs font-bold text-slate-500 uppercase tracking-wider mb-2 ml-4">Тип Акаунт</h3>
-                            <div className="bg-white rounded-[20px] p-4 shadow-sm border border-slate-200 mb-8 flex items-center justify-between">
-                                <div className="flex items-center gap-3">
-                                    <div className={`w-10 h-10 rounded-xl flex items-center justify-center ${isCompany ? 'bg-blue-600 text-white' : 'bg-slate-100 text-slate-400'}`}>
+                             <div className="bg-white rounded-[24px] p-6 shadow-sm border border-slate-200 mb-8">
+                                <div className="flex items-center gap-3 mb-4">
+                                    <div className={`w-10 h-10 rounded-xl flex items-center justify-center ${user.stripeOnboardingComplete_company ? 'bg-blue-600 text-white' : 'bg-slate-100 text-slate-400'}`}>
                                         <Building2 size={20} />
                                     </div>
                                     <div>
-                                        <h4 className="font-bold text-slate-900 text-sm">Бизнес Профил</h4>
-                                        <p className="text-[10px] text-slate-500">За фирми и екипи</p>
+                                        <h4 className="font-bold text-slate-900 text-sm">Статус на акаунта</h4>
+                                        <p className="text-[10px] text-slate-500">
+                                            {user.stripeOnboardingComplete_company ? 'Активен като Фирма' : 'Активен като Лице'}
+                                        </p>
                                     </div>
                                 </div>
-                                <div 
-                                    onClick={() => setIsCompany(!isCompany)}
-                                    className={`w-14 h-8 rounded-full p-1 transition-colors duration-300 cursor-pointer ${isCompany ? 'bg-[#34C759]' : 'bg-[#E5E5EA]'}`}
-                                >
-                                    <div className={`w-6 h-6 bg-white rounded-full shadow-sm transition-transform duration-300 ${isCompany ? 'translate-x-6' : ''}`}></div>
-                                </div>
+                                <p className="text-[11px] text-slate-500 leading-relaxed italic">
+                                    Типът на вашия акаунт се определя автоматично спрямо свързаните Stripe сметки в таб "Финанси".
+                                </p>
                             </div>
 
                             {/* Skills - Grid Selection */}
@@ -821,12 +961,22 @@ export const UserProfile: React.FC<UserProfileProps> = ({
                                 </div>
                             </div>
 
-                            <button 
-                                onClick={handleSaveSettings} 
-                                className="w-full py-4 bg-[#007AFF] text-white rounded-[20px] text-base font-bold active:scale-95 transition-all shadow-lg shadow-blue-500/30 flex items-center justify-center gap-2"
-                            >
-                                {isSavingSettings ? <Loader2 size={20} className="animate-spin" /> : saveSettingsSuccess ? <Check size={20}/> : 'Запази Промените'}
-                            </button>
+                            {/* DANGER ZONE */}
+                            <div className="mt-12 pt-8 border-t border-red-100">
+                                <h3 className="text-xs font-bold text-red-500 uppercase tracking-wider mb-2 ml-4">Опасна зона</h3>
+                                <div className="bg-red-50/50 rounded-[24px] p-6 border border-red-100 shadow-sm">
+                                    <p className="text-[11px] text-red-400 mb-4 font-medium leading-relaxed">
+                                        Ако имате проблеми със свързването на Stripe акаунта (например грешка "Access revoked"), можете да изчистите текущата връзка от тук.
+                                    </p>
+                                    <button 
+                                        onClick={handleResetStripe} 
+                                        className="w-full py-3 bg-white text-red-600 border border-red-200 rounded-xl text-xs font-bold active:scale-95 transition-all flex items-center justify-center gap-2 hover:bg-red-50"
+                                    >
+                                        <AlertTriangle size={16} />
+                                        Изчисти Stripe връзката
+                                    </button>
+                                </div>
+                            </div>
                         </div>
                     )}
 

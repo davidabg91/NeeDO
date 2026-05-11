@@ -160,7 +160,7 @@ export const translations = {
     status_CLOSED: "Приключена",
 
     // Task Card / Details
-    badge_new: "НОВ",
+    badge_new: "НОВО",
     badge_km: "КМ",
     badge_offers: "оферти",
     badge_no_offers: "Няма оферти",

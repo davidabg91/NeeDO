@@ -328,6 +328,10 @@ export const subscribeToTaskReviews = (taskId: string, callback: (reviews: Revie
 };
 
 export const subscribeToUserReviews = (userId: string, callback: (reviews: Review[]) => void) => {
+    if (!userId) {
+        callback([]);
+        return () => {};
+    }
     const q = query(
         collectionGroup(db, 'reviews'),
         where('toUserId', '==', userId),
@@ -341,6 +345,7 @@ export const subscribeToUserReviews = (userId: string, callback: (reviews: Revie
 };
 
 export const fetchTasksByUser = async (userId: string): Promise<Task[]> => {
+    if (!userId) return [];
     try {
         const tasksRef = collection(db, TASKS_COLLECTION);
         
@@ -459,6 +464,27 @@ export const updateTaskStatus = async (taskId: string, status: TaskStatus, extra
         console.warn("Update status failed", safeErrorMsg(e));
     }
 };
+
+export const updateTaskFields = async (taskId: string, fields: any) => {
+    if (taskId.startsWith('mock-')) {
+        const task = mockTasks.find(t => t.id === taskId);
+        if (task) {
+            Object.assign(task, fields);
+            broadcastMockTasks();
+        }
+        return;
+    }
+
+    try {
+        const taskRef = doc(db, TASKS_COLLECTION, taskId);
+        await updateDoc(taskRef, fields);
+    } catch (e) {
+        console.error("updateTaskFields failed", safeErrorMsg(e));
+        throw e;
+    }
+};
+
+export { arrayUnion };
 
 // --- OFFERS ---
 
@@ -653,6 +679,7 @@ export const sendDirectMessage = async (taskId: string, message: Omit<DirectMess
 };
 
 export const fetchOlderMessages = async (taskId: string, beforeTimestamp: number): Promise<DirectMessage[]> => {
+    if (!taskId || !beforeTimestamp) return [];
     if (taskId.startsWith('mock-')) {
         return [];
     }
@@ -680,18 +707,22 @@ export const fetchOlderMessages = async (taskId: string, beforeTimestamp: number
 // --- NOTIFICATIONS ---
 
 export const subscribeToNotifications = (userId: string, callback: (notifications: Notification[]) => void) => {
+    if (!userId) {
+        callback([]);
+        return () => {};
+    }
     // OPTIMIZATION: Limit to recent notifications (last 50)
     const q = query(
         collection(db, NOTIFICATIONS_COLLECTION),
         where("userId", "==", userId),
+        orderBy("createdAt", "desc"),
         limit(50)
     );
 
     const unsubscribe = onSnapshot(q,
         (snapshot) => {
             const userNotifs = snapshot.docs
-                .map(doc => ({ id: doc.id, ...doc.data() } as Notification))
-                .sort((a, b) => b.createdAt - a.createdAt); // Client-side sort
+                .map(doc => ({ id: doc.id, ...doc.data() } as Notification));
             callback(userNotifs);
         },
         (error) => {
@@ -738,6 +769,7 @@ export const markNotificationRead = async (notificationId: string) => {
 };
 
 export const markAllNotificationsRead = async (userId: string) => {
+    if (!userId) return;
     try {
         const q = query(collection(db, NOTIFICATIONS_COLLECTION), where("userId", "==", userId), where("isRead", "==", false));
         const snapshot = await getDocs(q);

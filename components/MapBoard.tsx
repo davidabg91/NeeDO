@@ -2,8 +2,9 @@
 import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { Map, Overlay } from 'pigeon-maps';
 import { Task, TaskStatus } from '../types';
-import { Navigation, Loader2, Plus, Minus, Map as MapIcon, Globe, Users, Briefcase, Zap } from 'lucide-react';
+import { Navigation, Loader2, Plus, Minus, Map as MapIcon, Globe, Users, Briefcase, Zap, MessageSquare } from 'lucide-react';
 import { RouteLine } from './RouteLine';
+import { useLanguage } from '../contexts/LanguageContext';
 import { CATEGORIES_LIST } from '../constants';
 
 // Cast Overlay to any to avoid "key" prop error in strict environments
@@ -117,6 +118,7 @@ export const MapBoard: React.FC<MapBoardProps> = ({ tasks, onTaskClick, center, 
     const [isLocating, setIsLocating] = useState(false);
 
     // State for map view control
+    const { t } = useLanguage();
     const [internalCenter, setInternalCenter] = useState(center);
     const [internalZoom, setInternalZoom] = useState(13);
     const [mapTheme, setMapTheme] = useState<'standard' | 'satellite'>('standard');
@@ -258,7 +260,7 @@ export const MapBoard: React.FC<MapBoardProps> = ({ tasks, onTaskClick, center, 
                                         bg-white border border-white/40 
                                         p-[0.5px] shadow-[0_15px_35px_-5px_rgba(0,0,0,0.3)] 
                                         group-hover:-translate-y-2 group-hover:shadow-[0_25px_50px_-10px_rgba(0,0,0,0.4)] 
-                                        transition-all duration-500 overflow-hidden ring-1 ring-white/10
+                                        transition-all duration-500 ring-1 ring-white/10
                                     `}
                                     style={{
                                         backfaceVisibility: 'hidden',
@@ -282,11 +284,24 @@ export const MapBoard: React.FC<MapBoardProps> = ({ tasks, onTaskClick, center, 
                                         </div>
                                     </div>
                                     {(hasOffers || showNewBadge) && (
-                                        <div className="absolute top-1 right-1 z-40">
-                                            <div className={`h-6 min-w-[24px] px-2 rounded-full border border-white/40 shadow-2xl flex items-center justify-center ${hasOffers ? 'bg-amber-600' : 'bg-blue-700'}`}>
-                                                <span className="text-[10px] font-black text-white leading-none">
-                                                    {hasOffers ? (task.offersCount || task.offers.length) : 'NEW'}
-                                                </span>
+                                        <div className="absolute -top-3 -right-3 z-40 animate-in zoom-in duration-300">
+                                            <div className={`
+                                                h-8 min-w-[32px] px-2 rounded-2xl flex items-center justify-center gap-1
+                                                border border-white/40 shadow-[0_8px_16px_rgba(0,0,0,0.4)] backdrop-blur-md
+                                                ring-2 ring-white
+                                                ${hasOffers 
+                                                    ? 'bg-gradient-to-br from-amber-500 via-orange-600 to-amber-700' 
+                                                    : 'bg-gradient-to-br from-blue-600 via-indigo-700 to-blue-800 animate-pulse'}
+                                            `}>
+                                                {hasOffers ? (
+                                                    <span className="text-[14px] font-black text-white leading-none drop-shadow-sm">
+                                                        {task.offersCount || task.offers.length}
+                                                    </span>
+                                                ) : (
+                                                    <span className="text-[10px] font-black text-white leading-none uppercase tracking-tighter drop-shadow-sm">
+                                                        {t('badge_new')}
+                                                    </span>
+                                                )}
                                             </div>
                                         </div>
                                     )}

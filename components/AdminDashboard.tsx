@@ -26,6 +26,8 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
 }) => {
     const [activeTab, setActiveTab] = useState<AdminTab>('DASHBOARD');
     const [searchTerm, setSearchTerm] = useState('');
+    const [roleFilter, setRoleFilter] = useState<'ALL' | 'USER' | 'ADMIN'>('ALL');
+    const [statusFilter, setStatusFilter] = useState<'ALL' | TaskStatus>('ALL');
     const [viewChatTask, setViewChatTask] = useState<Task | null>(null);
     const [isSidebarOpen, setIsSidebarOpen] = useState(false);
 
@@ -72,18 +74,20 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
     }), [users, tasks]);
 
     // Memoized Filtered Lists
-    const filteredUsers = useMemo(() =>
-        users.filter(u =>
-            u.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
-            u.email.toLowerCase().includes(searchTerm.toLowerCase())
+    const filteredUsers = useMemo(() => 
+        users.filter(u => 
+            (u.name?.toLowerCase().includes(searchTerm.toLowerCase()) || 
+             u.email?.toLowerCase().includes(searchTerm.toLowerCase())) &&
+            (roleFilter === 'ALL' || u.role === roleFilter)
         ),
-        [users, searchTerm]);
+        [users, searchTerm, roleFilter]);
 
-    const filteredTasks = useMemo(() =>
-        tasks.filter(t =>
-            t.title.toLowerCase().includes(searchTerm.toLowerCase())
+    const filteredTasks = useMemo(() => 
+        tasks.filter(t => 
+            (t.title?.toLowerCase().includes(searchTerm.toLowerCase())) &&
+            (statusFilter === 'ALL' || t.status === statusFilter)
         ),
-        [tasks, searchTerm]);
+        [tasks, searchTerm, statusFilter]);
 
     const handleDeleteWithConfirm = (e: React.MouseEvent, taskId: string) => {
         e.stopPropagation();
@@ -622,6 +626,82 @@ const AdminTaskDetail = ({ task, onClose, onDelete, onOpenChat }: { task: Task, 
                                 <div>
                                     <p className="text-xs font-bold text-emerald-800 uppercase">Escrow Депозит</p>
                                     <p className="text-sm font-black text-emerald-600">{task.escrowAmount} € (Защитени)</p>
+                                </div>
+                            </div>
+                        )}
+
+                        {/* ADMIN: Materials History */}
+                        {task.materialsPayments && task.materialsPayments.length > 0 && (
+                            <div className="bg-blue-50 border border-blue-100 rounded-2xl p-4">
+                                <h4 className="text-[10px] font-black text-blue-600 uppercase mb-3 flex items-center gap-2">
+                                    <DollarSign size={14} /> История на Материалите
+                                </h4>
+                                <div className="space-y-2">
+                                    {task.materialsPayments.map(p => (
+                                        <div key={p.id} className="bg-white border border-blue-50 p-3 rounded-xl flex justify-between items-center shadow-sm">
+                                            <div>
+                                                <p className="text-xs font-bold text-slate-800">{p.amount} €</p>
+                                                <p className="text-[10px] text-slate-500 line-clamp-1 italic">"{p.description}"</p>
+                                            </div>
+                                            <div className="flex flex-col items-end">
+                                                <span className={`text-[8px] font-black px-1.5 py-0.5 rounded uppercase ${p.status === 'PAID' ? 'bg-emerald-100 text-emerald-700' : p.status === 'REJECTED' ? 'bg-red-100 text-red-700' : 'bg-slate-100 text-slate-500'}`}>
+                                                    {p.status}
+                                                </span>
+                                                {p.paidAt && <span className="text-[8px] text-slate-400 mt-1">{new Date(p.paidAt).toLocaleDateString()}</span>}
+                                            </div>
+                                        </div>
+                                    ))}
+                                </div>
+                            </div>
+                        )}
+
+                        {/* ADMIN: Extension History */}
+                        {task.extensionRequests && task.extensionRequests.length > 0 && (
+                            <div className="bg-amber-50 border border-amber-100 rounded-2xl p-4">
+                                <h4 className="text-[10px] font-black text-amber-600 uppercase mb-3 flex items-center gap-2">
+                                    <Calendar size={14} /> Заявки за Удължаване
+                                </h4>
+                                <div className="space-y-2">
+                                    {task.extensionRequests.map(r => (
+                                        <div key={r.id} className="bg-white border border-amber-50 p-3 rounded-xl shadow-sm">
+                                            <div className="flex justify-between items-start mb-1">
+                                                <p className="text-xs font-bold text-slate-800">До: {new Date(r.newDate).toLocaleDateString()}</p>
+                                                <span className={`text-[8px] font-black px-1.5 py-0.5 rounded uppercase ${r.status === 'APPROVED' ? 'bg-emerald-100 text-emerald-700' : r.status === 'REJECTED' ? 'bg-red-100 text-red-700' : 'bg-slate-100 text-slate-500'}`}>
+                                                    {r.status}
+                                                </span>
+                                            </div>
+                                            <p className="text-[10px] text-slate-500 italic">"{r.reason}"</p>
+                                            {r.rejectionReason && <p className="text-[9px] text-red-500 mt-1 font-bold">Отказ: {r.rejectionReason}</p>}
+                                        </div>
+                                    ))}
+                                </div>
+                            </div>
+                        )}
+
+                        {/* ADMIN: Circumstances History */}
+                        {task.circumstances && task.circumstances.length > 0 && (
+                            <div className="bg-orange-50 border border-orange-100 rounded-2xl p-4">
+                                <h4 className="text-[10px] font-black text-orange-600 uppercase mb-3 flex items-center gap-2">
+                                    <AlertTriangle size={14} /> Непредвидени Обстоятелства
+                                </h4>
+                                <div className="space-y-2">
+                                    {task.circumstances.map(c => (
+                                        <div key={c.id} className="bg-white border border-orange-50 p-3 rounded-xl shadow-sm">
+                                            <div className="flex justify-between items-start mb-1">
+                                                <p className="text-xs font-bold text-slate-800">{c.description}</p>
+                                                <span className={`text-[8px] font-black px-1.5 py-0.5 rounded uppercase ${c.status === 'APPROVED' ? 'bg-emerald-100 text-emerald-700' : c.status === 'REJECTED' ? 'bg-red-100 text-red-700' : 'bg-slate-100 text-slate-500'}`}>
+                                                    {c.status}
+                                                </span>
+                                            </div>
+                                            {(c.requestedPrice || c.requestedExtension) && (
+                                                <div className="flex gap-3 mt-2 border-t border-slate-50 pt-2">
+                                                    {c.requestedPrice && <span className="text-[9px] font-bold text-slate-700">+{c.requestedPrice} €</span>}
+                                                    {c.requestedExtension && <span className="text-[9px] font-bold text-slate-700">Удълж: {new Date(c.requestedExtension).toLocaleDateString()}</span>}
+                                                </div>
+                                            )}
+                                            {c.rejectionReason && <p className="text-[9px] text-red-500 mt-1 font-bold">Отказ: {c.rejectionReason}</p>}
+                                        </div>
+                                    ))}
                                 </div>
                             </div>
                         )}

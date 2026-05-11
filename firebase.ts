@@ -8,7 +8,7 @@ import { initializeAppCheck, ReCaptchaEnterpriseProvider } from "firebase/app-ch
 // Valid configuration for project Needo
 const firebaseConfig = {
   apiKey: "AIzaSyDS1wlI1_GghWVqy820I8oukzJD3LdipPY",
-  authDomain: "needo-3cfbd.firebaseapp.com",
+  authDomain: "needobg.com", // Essential for mobile session persistence on custom domains
   projectId: "needo-3cfbd",
   storageBucket: "needo-3cfbd.firebasestorage.app",
   messagingSenderId: "247568530128",
@@ -19,9 +19,8 @@ const firebaseConfig = {
 const app = initializeApp(firebaseConfig);
 export const auth = getAuth(app);
 
-// Initialize App Check
-// Note: In production, this uses reCAPTCHA Enterprise.
-// For local development, we use the debug token.
+// Initialize App Check (TEMPORARILY DISABLED DUE TO 403 ERRORS AND THROTTLING)
+/*
 if (typeof window !== "undefined") {
   if (import.meta.env.DEV) {
     // @ts-ignore
@@ -33,6 +32,7 @@ if (typeof window !== "undefined") {
     isTokenAutoRefreshEnabled: true
   });
 }
+*/
 
 // Initialize Firestore with settings to fix connection timeouts
 // experimentalForceLongPolling ensures connectivity in restrictive network environments

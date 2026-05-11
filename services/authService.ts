@@ -1,4 +1,3 @@
-
 import { auth, db } from '../firebase';
 import { 
   signInWithEmailAndPassword, 
@@ -10,7 +9,9 @@ import {
   signInWithPopup,
   signInWithRedirect,
   getRedirectResult,
-  sendPasswordResetEmail
+  sendPasswordResetEmail,
+  setPersistence,
+  browserLocalPersistence
 } from 'firebase/auth';
 import { doc, setDoc, getDoc, getDocs, collection, updateDoc, query, where } from 'firebase/firestore';
 import { AppUser } from '../types';
@@ -74,24 +75,25 @@ export const loginWithGoogle = async (): Promise<AppUser | void> => {
   try {
     const provider = new GoogleAuthProvider();
     
-    // Check if on mobile (iOS/Android) or if Safari (which often blocks popups)
+    // Force local persistence to ensure session survives mobile redirects
+    await setPersistence(auth, browserLocalPersistence);
+
     const isMobile = /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent);
-    const isSafari = /^((?!chrome|android).)*safari/i.test(navigator.userAgent);
-
-    if (isMobile || isSafari) {
-      await signInWithRedirect(auth, provider);
-      return; // Will navigate away
+    
+    if (isMobile) {
+      console.log("AuthService: Using Redirect for real mobile device...");
+      return await signInWithRedirect(auth, provider);
     }
 
+    console.log("AuthService: Using Popup for desktop...");
     const result = await signInWithPopup(auth, provider);
-    const fbUser = result.user;
-    return await handleAuthResult(fbUser);
+    return await handleAuthResult(result.user);
   } catch (error: any) {
-    console.error("Google Login Error:", error instanceof Error ? error.message : String(error));
-    if (error.code === 'auth/popup-closed-by-user') {
-        throw new Error("Входът беше отказан.");
+    console.error("Google Login Error:", error.code, error.message);
+    if (error.code === 'auth/popup-blocked') {
+        throw new Error("Моля, разрешете изскачащите прозорци (popups), за да влезете с Google.");
     }
-    throw new Error("Неуспешен вход с Google.");
+    throw new Error(`Неуспешен вход с Google: ${error.code}`);
   }
 };
 
@@ -100,13 +102,20 @@ export const loginWithGoogle = async (): Promise<AppUser | void> => {
  */
 export const handleRedirectResult = async (): Promise<AppUser | null> => {
   try {
+    console.log("AuthService: Fetching redirect result...");
     const result = await getRedirectResult(auth);
     if (result) {
+      console.log("AuthService: Successfully obtained redirect result for:", result.user.email);
       return await handleAuthResult(result.user);
     }
+    console.log("AuthService: No redirect result (null).");
     return null;
-  } catch (error) {
-    console.error("Redirect Result Error:", error);
+  } catch (error: any) {
+    console.error("AuthService: Redirect Result Error:", error.code, error.message);
+    // Common mobile error: auth/redirect-cancelled-by-user or auth/unauthorized-domain
+    if (error.code === 'auth/unauthorized-domain') {
+        console.error("CRITICAL: Domain not authorized in Firebase Console!");
+    }
     return null;
   }
 };
@@ -189,8 +198,8 @@ export const registerUserWithPassword = async (
       isAdmin: email === 'davida1991@gmail.com',
       status: 'ACTIVE',
       isCompany: isCompany || false,
-      companyCategory: companyCategory || undefined,
-      companyFoundedDate: companyFoundedDate || undefined,
+      companyCategory: companyCategory || null,
+      companyFoundedDate: companyFoundedDate || null,
       businessCategories: isCompany && companyCategory ? [companyCategory] : []
     };
 
@@ -284,6 +293,7 @@ export const updateUserProfile = async (userId: string, data: Partial<AppUser>) 
 };
 
 export const getProvidersByCategory = async (category: string): Promise<AppUser[]> => {
+    if (!category) return [];
     try {
         const q = query(collection(db, "users"), where("businessCategories", "array-contains", category));
         const querySnapshot = await getDocs(q);

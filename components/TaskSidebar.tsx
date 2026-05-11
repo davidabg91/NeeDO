@@ -1,7 +1,7 @@
 
 import React, { useState, useRef, useEffect } from 'react';
 import { Task, TaskStatus, Offer, Review, AppUser } from '../types';
-import { X, DollarSign, Clock, User as UserIcon, ShieldCheck, Briefcase, MapPin, Calendar, AlignLeft, ChevronDown, Zap, TrendingDown, Image as ImageIcon, Camera, UploadCloud, Quote, Star, ChevronRight, ChevronLeft, CheckCircle, MessageSquare, Timer, CalendarClock, ArrowRight, Map, Phone, Lock, ZoomIn, Heart, Sparkles, LogIn, Trash2, Building2, PlayCircle, CreditCard, AlertTriangle, AlertCircle, Coins, Info, Check, Trophy, Rocket, ExternalLink, MessageCircle, Tag, Navigation, Verified, Eye, Layers, Wand2, Loader2, FileWarning, Hourglass, Share2, Link2, Copy, Hammer, Award, FileText, BadgeCheck, Users } from 'lucide-react';
+import { X, DollarSign, Clock, User as UserIcon, ShieldCheck, Briefcase, MapPin, Calendar, AlignLeft, ChevronDown, Zap, TrendingDown, Image as ImageIcon, Camera, UploadCloud, Quote, Star, ChevronRight, ChevronLeft, CheckCircle, MessageSquare, Timer, CalendarClock, ArrowRight, Map, Phone, Lock, ZoomIn, Heart, Sparkles, LogIn, Trash2, Building2, PlayCircle, CreditCard, AlertTriangle, AlertCircle, Coins, Info, Check, Trophy, Rocket, ExternalLink, MessageCircle, Tag, Navigation, Verified, Eye, Layers, Wand2, Loader2, FileWarning, Hourglass, Share2, Link2, Copy, Hammer, Award, FileText, BadgeCheck, Users, Maximize2, CheckCircle2, XCircle } from 'lucide-react';
 import { StarRating } from './StarRating';
 import { getUserById, syncUserProfile } from '../services/authService';
 import { calculateDistance } from '../utils/geo';
@@ -14,7 +14,7 @@ interface TaskSidebarProps {
     onClose: () => void;
     isRequester: boolean;
     currentUserId?: string;
-    onAddOffer: (taskId: string, price: number, duration: string, description: string, date: string, isCompany?: boolean) => void;
+    onAddOffer: (taskId: string, price: number, duration: string, description: string, date: string, billingType: 'individual' | 'company') => void;
     onAcceptOffer: (taskId: string, offerId: string) => void;
     onFundEscrow: (taskId: string) => void;
     onProviderSubmitWork: (taskId: string, completionImage: string, requesterRating: number, requesterReview: string) => void;
@@ -27,6 +27,16 @@ interface TaskSidebarProps {
     userLocation?: [number, number] | null;
     onOpenQA?: () => void;
     onOpenChat?: () => void;
+    // New Management Props
+    onMaterialsRequest?: (taskId: string, amount: number, description: string) => Promise<void>;
+    onPayMaterials?: (taskId: string, paymentId: string) => Promise<void>;
+    onRejectMaterials?: (taskId: string, paymentId: string, reason: string) => Promise<void>;
+    onExtensionRequest?: (taskId: string, newDate: string, reason: string) => Promise<void>;
+    onHandleExtension?: (taskId: string, requestId: string, action: 'ACCEPT' | 'REJECT', reason?: string) => Promise<void>;
+    onReportCircumstance?: (taskId: string, description: string, extraPrice?: number, extraTime?: string) => Promise<void>;
+    onHandleCircumstance?: (taskId: string, circumstanceId: string, action: 'ACCEPT' | 'REJECT', reason?: string) => Promise<void>;
+    onMutualCancel?: (taskId: string, reason?: string) => Promise<void>;
+    onReportProblem?: (taskId: string, reason: string) => Promise<void>;
 }
 
 const DEFAULT_AVATAR = "/logo.jpg";
@@ -48,7 +58,16 @@ export const TaskSidebar: React.FC<TaskSidebarProps> = ({
     onDeleteTask,
     userLocation,
     onOpenQA,
-    onOpenChat
+    onOpenChat,
+    onMaterialsRequest,
+    onPayMaterials,
+    onRejectMaterials,
+    onExtensionRequest,
+    onHandleExtension,
+    onReportCircumstance,
+    onHandleCircumstance,
+    onMutualCancel,
+    onReportProblem
 }) => {
     const { t } = useLanguage();
 
@@ -85,6 +104,31 @@ export const TaskSidebar: React.FC<TaskSidebarProps> = ({
     const [isDeleting, setIsDeleting] = useState(false);
     const [deleteStep, setDeleteStep] = useState<'IDLE' | 'CONFIRM'>('IDLE');
 
+    // Management Tool States
+    const [isMaterialsFormOpen, setIsMaterialsFormOpen] = useState(false);
+    const [materialsAmount, setMaterialsAmount] = useState('');
+    const [materialsDesc, setMaterialsDesc] = useState('');
+    
+    const [isExtensionFormOpen, setIsExtensionFormOpen] = useState(false);
+    const [extensionDate, setExtensionDate] = useState('');
+    const [extensionReason, setExtensionReason] = useState('');
+
+    const [isCircumstanceFormOpen, setIsCircumstanceFormOpen] = useState(false);
+    const [circumstanceDesc, setCircumstanceDesc] = useState('');
+    const [circumstanceExtraPrice, setCircumstanceExtraPrice] = useState('');
+    const [circumstanceExtraTime, setCircumstanceExtraTime] = useState('');
+
+    const [cancelStep, setCancelStep] = useState<'IDLE' | 'FORM' | 'CONFIRM'>('IDLE');
+    const [cancelReasonInput, setCancelReasonInput] = useState('');
+    const [isReportFormOpen, setIsReportFormOpen] = useState(false);
+    const [reportReasonInput, setReportReasonInput] = useState('');
+    const [isProcessingAction, setIsProcessingAction] = useState(false);
+    
+    // Rejection States
+    const [rejectingItemId, setRejectingItemId] = useState<string | null>(null);
+    const [rejectionType, setRejectionType] = useState<'MATERIALS' | 'CIRCUMSTANCE' | 'EXTENSION' | null>(null);
+    const [rejectionReason, setRejectionReason] = useState('');
+
     // Share State
     const [showCopiedToast, setShowCopiedToast] = useState(false);
 
@@ -104,6 +148,28 @@ export const TaskSidebar: React.FC<TaskSidebarProps> = ({
         }
     }, [currentUserId]);
 
+    const handleRejectionSubmit = async () => {
+        if (!rejectionReason.trim() || !rejectingItemId) return;
+        setIsProcessingAction(true);
+        try {
+            if (rejectionType === 'MATERIALS') {
+                await onRejectMaterials?.(task.id, rejectingItemId, rejectionReason);
+            } else if (rejectionType === 'EXTENSION') {
+                await onHandleExtension?.(task.id, rejectingItemId, 'REJECT', rejectionReason);
+            } else if (rejectionType === 'CIRCUMSTANCE') {
+                await onHandleCircumstance?.(task.id, rejectingItemId, 'REJECT', rejectionReason);
+            }
+            // Reset states
+            setRejectingItemId(null);
+            setRejectionType(null);
+            setRejectionReason('');
+        } catch (e) {
+            console.error(e);
+        } finally {
+            setIsProcessingAction(false);
+        }
+    };
+
     // Load fresh requester profile (Fix for 0.0 rating)
     useEffect(() => {
         if (task?.requesterId) {
@@ -112,6 +178,22 @@ export const TaskSidebar: React.FC<TaskSidebarProps> = ({
             });
         }
     }, [task?.requesterId]);
+
+    // Fetch live provider data for all offers to ensure ratings are correct
+    const [providerProfiles, setProviderProfiles] = useState<Record<string, AppUser>>({});
+    useEffect(() => {
+        if (task?.offers && task.offers.length > 0) {
+            task.offers.forEach(offer => {
+                if (!providerProfiles[offer.providerId]) {
+                    getUserById(offer.providerId).then(user => {
+                        if (user) {
+                            setProviderProfiles(prev => ({ ...prev, [offer.providerId]: user }));
+                        }
+                    });
+                }
+            });
+        }
+    }, [task?.offers]);
 
     // --- ANIMATION LOGIC ---
     useEffect(() => {
@@ -169,6 +251,7 @@ export const TaskSidebar: React.FC<TaskSidebarProps> = ({
     const distance = userLocation ? calculateDistance(userLocation[0], userLocation[1], task.location.lat, task.location.lng) : null;
     const acceptedOffer = task.offers?.find(o => o.id === task.acceptedOfferId);
 
+
     // Fallback logic for completed tasks with missing/lazy-loaded offer data
     const finalPrice = acceptedOffer?.price || task.escrowAmount || 0;
     const providerId = acceptedOffer?.providerId || task.reviews?.find(r => r.toUserId !== task.requesterId)?.toUserId;
@@ -218,17 +301,31 @@ export const TaskSidebar: React.FC<TaskSidebarProps> = ({
         }
     };
 
-    const handleProviderSubmit = () => {
+    const handleProviderSubmit = async () => {
         if (!completionImage) { alert('Задължително е да качите снимка на свършената работа.'); return; }
         if (providerRateRequester === 0) { alert('Моля, оставете рейтинг за клиента.'); return; }
-        onProviderSubmitWork(task.id, completionImage, providerRateRequester, providerReviewRequester);
-        setIsSubmittingWork(false);
+        setIsProcessingAction(true);
+        try {
+            await onProviderSubmitWork(task.id, completionImage, providerRateRequester, providerReviewRequester);
+            setIsSubmittingWork(false);
+        } catch (e) {
+            console.error("Submit work failed", e);
+        } finally {
+            setIsProcessingAction(false);
+        }
     };
 
-    const handleRequesterApprove = () => {
+    const handleRequesterApprove = async () => {
         if (requesterRateProvider === 0) { alert('Моля, дайте оценка на изпълнителя.'); return; }
-        onRequesterApproveWork(task.id, requesterRateProvider, requesterReviewProvider, requesterEvidenceImage);
-        setIsApproving(false);
+        setIsProcessingAction(true);
+        try {
+            await onRequesterApproveWork(task.id, requesterRateProvider, requesterReviewProvider, requesterEvidenceImage);
+            setIsApproving(false);
+        } catch (e) {
+            console.error("Approve work failed", e);
+        } finally {
+            setIsProcessingAction(false);
+        }
     };
 
     const handleDelete = async (e: React.MouseEvent) => {
@@ -336,11 +433,99 @@ export const TaskSidebar: React.FC<TaskSidebarProps> = ({
     const displayRequesterAvatar = requesterProfile ? requesterProfile.avatarUrl : task.requesterAvatar;
 
     // Use calculated rating > 0, otherwise profile rating, otherwise snapshot
-    const displayRequesterRating = calculatedRequesterRating > 0
-        ? calculatedRequesterRating
-        : (requesterProfile?.rating || task.requesterRating || 0);
+    const displayRequesterRating = (requesterProfile?.rating !== undefined && requesterProfile.rating > 0)
+        ? requesterProfile.rating
+        : (calculatedRequesterRating > 0 ? calculatedRequesterRating : (task.requesterRating || 0));
 
     const displayRequesterIsCompany = requesterProfile ? requesterProfile.isCompany : task.requesterIsCompany;
+
+    const handleMaterialsRequest = async () => {
+        if (!materialsAmount || !materialsDesc || !onMaterialsRequest) return;
+        setIsProcessingAction(true);
+        try {
+            await onMaterialsRequest(task.id, parseFloat(materialsAmount), materialsDesc);
+            setIsMaterialsFormOpen(false);
+            setMaterialsAmount('');
+            setMaterialsDesc('');
+        } catch (e) { console.error(e); }
+        finally { setIsProcessingAction(false); }
+    };
+
+    const handleExtensionRequest = async () => {
+        if (!extensionDate || !extensionReason || !onExtensionRequest) return;
+        setIsProcessingAction(true);
+        try {
+            await onExtensionRequest(task.id, extensionDate, extensionReason);
+            setIsExtensionFormOpen(false);
+            setExtensionDate('');
+            setExtensionReason('');
+        } catch (e) { console.error(e); }
+        finally { setIsProcessingAction(false); }
+    };
+
+    const handleReportCircumstance = async () => {
+        if (!circumstanceDesc || !onReportCircumstance) return;
+        setIsProcessingAction(true);
+        try {
+            await onReportCircumstance(
+                task.id, 
+                circumstanceDesc, 
+                circumstanceExtraPrice ? parseFloat(circumstanceExtraPrice) : undefined, 
+                circumstanceExtraTime || undefined
+            );
+            setIsCircumstanceFormOpen(false);
+            setCircumstanceDesc('');
+            setCircumstanceExtraPrice('');
+            setCircumstanceExtraTime('');
+        } catch (e) { console.error(e); }
+        finally { setIsProcessingAction(false); }
+    };
+
+    const handleMutualCancel = async () => {
+        if (!onMutualCancel) return;
+        
+        // If the other party initiated, we don't need a form, just accept
+        const otherInitiated = task.cancelInitiatedBy && task.cancelInitiatedBy !== currentUserId;
+        
+        if (otherInitiated) {
+            setIsProcessingAction(true);
+            try {
+                await onMutualCancel(task.id);
+            } catch (e) { console.error(e); }
+            finally { setIsProcessingAction(false); }
+            return;
+        }
+
+        if (cancelStep === 'IDLE') {
+            setCancelStep('FORM');
+            return;
+        }
+
+        if (cancelStep === 'FORM') {
+            if (!cancelReasonInput.trim()) return;
+            setCancelStep('CONFIRM');
+            return;
+        }
+
+        setIsProcessingAction(true);
+        try {
+            await onMutualCancel(task.id, cancelReasonInput);
+            setCancelStep('IDLE');
+            setCancelReasonInput('');
+        } catch (e) { console.error(e); }
+        finally { setIsProcessingAction(false); }
+    };
+
+    const handleReportProblem = async () => {
+        if (!reportReasonInput.trim() || !onReportProblem) return;
+        setIsProcessingAction(true);
+        try {
+            await onReportProblem(task.id, reportReasonInput);
+            setIsReportFormOpen(false);
+            setReportReasonInput('');
+        } catch (e) { console.error(e); }
+        finally { setIsProcessingAction(false); }
+    };
 
     return (
         <>
@@ -362,11 +547,23 @@ export const TaskSidebar: React.FC<TaskSidebarProps> = ({
 
                         {/* Main Image with transition key */}
                         <img
-                            key={currentImageIndex}
+                            key={taskImages[currentImageIndex]}
                             src={taskImages[currentImageIndex]}
                             alt="Task"
                             className="absolute inset-0 w-full h-full object-cover transition-opacity duration-300 z-10 animate-in fade-in"
                             decoding="async"
+                            onError={(e) => {
+                                const target = e.target as HTMLImageElement;
+                                const retryCount = (target as any)._retryCount || 0;
+                                if (retryCount < 3) {
+                                    (target as any)._retryCount = retryCount + 1;
+                                    setTimeout(() => {
+                                        const currentSrc = target.src;
+                                        target.src = '';
+                                        target.src = currentSrc;
+                                    }, 1000);
+                                }
+                            }}
                         />
 
                         <div className="absolute inset-0 bg-gradient-to-b from-black/60 via-transparent to-slate-950 pointer-events-none z-20" />
@@ -425,7 +622,16 @@ export const TaskSidebar: React.FC<TaskSidebarProps> = ({
 
                         <div className="absolute bottom-0 left-0 w-full p-4 z-30 flex flex-col gap-2 justify-end bg-gradient-to-t from-slate-950 via-slate-950/80 to-transparent pt-20">
                             <div onClick={(e) => { e.stopPropagation(); onUserClick(task.requesterId); }} className="flex items-center gap-3 bg-black/40 md:backdrop-blur-md border border-white/10 p-1.5 pr-4 rounded-full w-fit cursor-pointer active:bg-white/20 transition-all shadow-lg shrink-0">
-                                <img src={getSafeAvatar(displayRequesterAvatar)} className="w-8 h-8 rounded-full border-2 border-white/50 object-cover" alt="" />
+                                <img 
+                                    key={getSafeAvatar(displayRequesterAvatar)}
+                                    src={getSafeAvatar(displayRequesterAvatar)} 
+                                    className="w-8 h-8 rounded-full border-2 border-white/50 object-cover" 
+                                    alt="" 
+                                    onError={(e) => {
+                                        const target = e.target as HTMLImageElement;
+                                        if (target.src !== DEFAULT_AVATAR) target.src = DEFAULT_AVATAR;
+                                    }}
+                                />
                                 <div>
                                     <p className="text-xs font-bold text-white leading-none mb-0.5 flex items-center gap-1">{displayRequesterName} {displayRequesterIsCompany && <Verified size={10} className="text-blue-400 fill-blue-400" />}</p>
                                     <div className="flex items-center gap-1"><Star size={8} className="text-yellow-400 fill-yellow-400" /><span className="text-[10px] font-medium text-blue-100">{displayRequesterRating.toFixed(1)}</span></div>
@@ -472,6 +678,26 @@ export const TaskSidebar: React.FC<TaskSidebarProps> = ({
                         {/* PANEL 1: TASK DETAILS */}
                         <div className="mb-8">
                             <h3 className="text-[10px] font-bold text-slate-500 uppercase tracking-widest mb-3 flex items-center gap-2 px-2"><AlignLeft size={12} /> Детайли за задачата</h3>
+                            
+                            {/* NEW: Quick Info Row */}
+                            <div className="grid grid-cols-3 gap-2 mb-4">
+                                <div className="bg-slate-900/50 border border-slate-800 rounded-2xl p-3 flex flex-col items-center justify-center text-center">
+                                    <Calendar size={14} className="text-blue-400 mb-1.5" />
+                                    <span className="text-[9px] text-slate-500 font-bold uppercase tracking-tighter mb-0.5">Добавена</span>
+                                    <span className="text-[10px] text-slate-200 font-black">{new Date(task.createdAt).toLocaleDateString('bg-BG', { day: 'numeric', month: 'short' })}</span>
+                                </div>
+                                <div className="bg-slate-900/50 border border-slate-800 rounded-2xl p-3 flex flex-col items-center justify-center text-center">
+                                    <MapPin size={14} className="text-emerald-400 mb-1.5" />
+                                    <span className="text-[9px] text-slate-500 font-bold uppercase tracking-tighter mb-0.5">Адрес</span>
+                                    <span className="text-[10px] text-slate-200 font-black truncate w-full px-1">{task.address || 'Център'}</span>
+                                </div>
+                                <div className="bg-slate-900/50 border border-slate-800 rounded-2xl p-3 flex flex-col items-center justify-center text-center">
+                                    <Navigation size={14} className="text-purple-400 mb-1.5" />
+                                    <span className="text-[9px] text-slate-500 font-bold uppercase tracking-tighter mb-0.5">Дистанция</span>
+                                    <span className="text-[10px] text-slate-200 font-black">{distance !== null ? `${distance.toFixed(1)} км` : '--'}</span>
+                                </div>
+                            </div>
+
                             <div className="bg-slate-900 rounded-[28px] p-5 border border-slate-800 shadow-sm relative overflow-hidden">
                                 <div className="text-slate-400 text-[13px] leading-6 font-medium whitespace-pre-line relative z-10">{task.description}</div>
                                 <div className="h-px bg-slate-800 my-5"></div>
@@ -491,13 +717,33 @@ export const TaskSidebar: React.FC<TaskSidebarProps> = ({
                                     {/* Completion Image */}
                                     {task.completionImageUrl && (
                                         <div className="relative aspect-video w-full group cursor-pointer" onClick={() => openLightbox(task.completionImageUrl!)}>
-                                            <img src={task.completionImageUrl} className="w-full h-full object-cover" alt="Result" />
-                                            <div className="absolute inset-0 bg-gradient-to-t from-black/60 to-transparent"></div>
-                                            <div className="absolute bottom-4 left-4 flex items-center gap-2">
+                                            <img 
+                                                key={task.completionImageUrl}
+                                                src={task.completionImageUrl} 
+                                                className="w-full h-full object-cover" 
+                                                alt="Result" 
+                                                onError={(e) => {
+                                                    const target = e.target as HTMLImageElement;
+                                                    const retryCount = (target as any)._retryCount || 0;
+                                                    if (retryCount < 3) {
+                                                        (target as any)._retryCount = retryCount + 1;
+                                                        setTimeout(() => {
+                                                            const currentSrc = target.src;
+                                                            target.src = '';
+                                                            target.src = currentSrc;
+                                                        }, 1500);
+                                                    }
+                                                }}
+                                            />
+                                            <div className="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center">
+                                                <Maximize2 className="text-white" size={24} />
+                                            </div>
+                                            <div className="absolute inset-0 bg-gradient-to-t from-black/60 to-transparent pointer-events-none"></div>
+                                            <div className="absolute bottom-4 left-4 flex items-center gap-2 pointer-events-none">
                                                 <div className="bg-emerald-500 text-white p-1.5 rounded-lg shadow-lg"><Camera size={16} /></div>
                                                 <span className="text-white font-black text-xs uppercase tracking-widest drop-shadow-md">Снимка на изпълнението</span>
                                             </div>
-                                            <div className="absolute top-4 right-4 bg-black/40 backdrop-blur-md text-white px-3 py-1 rounded-full text-[10px] font-bold border border-white/10 uppercase">След</div>
+                                            <div className="absolute top-4 right-4 bg-black/40 backdrop-blur-md text-white px-3 py-1 rounded-full text-[10px] font-bold border border-white/10 uppercase pointer-events-none">След</div>
                                         </div>
                                     )}
 
@@ -519,7 +765,16 @@ export const TaskSidebar: React.FC<TaskSidebarProps> = ({
                                                         "{providerReview.comment}"
                                                     </p>
                                                     <div className="mt-2 flex items-center gap-2">
-                                                        <img src={getSafeAvatar(task.requesterAvatar)} className="w-5 h-5 rounded-full" alt="" />
+                                                        <img 
+                                                            key={getSafeAvatar(task.requesterAvatar)}
+                                                            src={getSafeAvatar(task.requesterAvatar)} 
+                                                            className="w-5 h-5 rounded-full" 
+                                                            alt="" 
+                                                            onError={(e) => {
+                                                                const target = e.target as HTMLImageElement;
+                                                                if (target.src !== DEFAULT_AVATAR) target.src = DEFAULT_AVATAR;
+                                                            }}
+                                                        />
                                                         <span className="text-[10px] font-bold text-slate-500">От {task.requesterName}</span>
                                                     </div>
                                                 </div>
@@ -583,44 +838,694 @@ export const TaskSidebar: React.FC<TaskSidebarProps> = ({
                         )}
 
                         {task.status === TaskStatus.IN_PROGRESS && (
-                            <div className="mt-6 mb-4 bg-slate-900 rounded-2xl border border-purple-500/20 p-5 shadow-sm relative overflow-hidden">
-                                <div className="absolute top-0 left-0 w-1 h-full bg-purple-500"></div>
-                                <div className="flex items-center gap-3 mb-3">
-                                    <div className="w-10 h-10 bg-purple-500/10 rounded-full flex items-center justify-center text-purple-500"><Briefcase size={20} /></div>
-                                    <div><h4 className="font-bold text-slate-100 text-sm">Работата е в процес</h4><p className="text-xs text-slate-400">Сумата е защитена.</p></div>
-                                </div>
-                                {iAmProvider && !isSubmittingWork && (
-                                    <button onClick={() => setIsSubmittingWork(true)} className="w-full py-3 bg-purple-600 text-white rounded-xl font-bold text-sm shadow-lg flex items-center justify-center gap-2"><CheckCircle size={18} /> Завърших Задачата</button>
-                                )}
-                                {iAmProvider && isSubmittingWork && (
-                                    <div className="bg-slate-950 p-4 rounded-xl border border-purple-500/30 animate-in fade-in space-y-4">
-                                        <div className="border border-dashed border-slate-700 rounded-xl p-3 bg-slate-900 text-center cursor-pointer" onClick={() => fileInputRef.current?.click()}>
-                                            <input type="file" ref={fileInputRef} onChange={(e) => handleFileChange(e, setCompletionImage)} className="hidden" accept="image/*" />
-                                            {completionImage ? <div className="text-green-500 text-xs font-bold">Снимка качена</div> : <div className="text-slate-400 text-xs font-bold">Качи снимка на резултата</div>}
-                                        </div>
-
-                                        {/* Provider Ratings Client */}
-                                        <div className="space-y-2">
-                                            <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest text-center">Оцени Клиента</p>
-                                            <div className="flex justify-center">
-                                                <StarRating rating={providerRateRequester} setRating={setProviderRateRequester} size={28} interactive={true} />
+                            <div className="mt-6 mb-4 space-y-4">
+                                {/* MAIN STATUS CARD */}
+                                <div className="bg-slate-900 rounded-3xl border border-purple-500/20 p-5 shadow-xl relative overflow-hidden">
+                                    <div className="absolute top-0 left-0 w-1.5 h-full bg-purple-500"></div>
+                                    <div className="flex items-center justify-between mb-4">
+                                        <div className="flex items-center gap-3">
+                                            <div className="w-12 h-12 bg-purple-500/10 rounded-2xl flex items-center justify-center text-purple-400 shadow-inner"><Briefcase size={24} /></div>
+                                            <div>
+                                                <h4 className="font-black text-slate-100 text-sm uppercase tracking-tight">Работата е в процес</h4>
+                                                <p className="text-[10px] text-purple-400 font-bold uppercase tracking-widest flex items-center gap-1"><ShieldCheck size={10} /> Сумата е защитена</p>
                                             </div>
                                         </div>
+                                        {/* QUICK ACTION BUTTONS */}
+                                        <div className="flex gap-3">
+                                            {onOpenChat && (
+                                                <button 
+                                                    onClick={onOpenChat}
+                                                    className="w-12 h-12 bg-indigo-600 text-white rounded-2xl flex items-center justify-center shadow-lg shadow-indigo-600/20 active:scale-95 transition-all shrink-0"
+                                                >
+                                                    <MessageSquare size={20} className="fill-white/20" />
+                                                </button>
+                                            )}
+                                            {(() => {
+                                                const partnerPhone = isRequester 
+                                                    ? (providerProfiles[acceptedOffer?.providerId || '']?.phoneNumber || task.acceptedProviderPhone)
+                                                    : (requesterProfile?.phoneNumber || task.requesterPhone);
+                                                
+                                                if (!partnerPhone) return null;
+                                                
+                                                return (
+                                                    <a 
+                                                        href={`tel:${partnerPhone}`} 
+                                                        className="w-12 h-12 bg-blue-500 text-white rounded-2xl flex items-center justify-center shadow-lg shadow-blue-500/20 active:scale-95 transition-all shrink-0"
+                                                    >
+                                                        <Phone size={20} className="fill-white/20" />
+                                                    </a>
+                                                );
+                                            })()}
+                                        </div>
+                                    </div>
 
-                                        <textarea
-                                            value={providerReviewRequester}
-                                            onChange={(e) => setProviderReviewRequester(e.target.value)}
-                                            placeholder="Напишете отзив за клиента (незадължително)..."
-                                            className="w-full p-3 bg-slate-900 border border-slate-700 rounded-xl text-slate-100 text-sm outline-none resize-none"
-                                            rows={3}
-                                        />
 
-                                        <button onClick={handleProviderSubmit} className="w-full py-3 bg-purple-600 text-white rounded-xl font-bold text-sm shadow-md">Предай за Одобрение</button>
+                                    {isRequester && !task.reportedByRequester && (
+                                        <>
+                                            <button 
+                                                onClick={() => setIsReportFormOpen(true)}
+                                                className="w-full py-3 mb-3 bg-red-500/10 hover:bg-red-500/20 text-red-400 rounded-2xl font-black text-[9px] uppercase tracking-widest border border-red-500/20 transition-all flex items-center justify-center gap-2"
+                                            >
+                                                <AlertTriangle size={14} />
+                                                СИГНАЛ - ДОКЛАДВАЙ ПРОБЛЕМ
+                                            </button>
+                                            
+                                            {isReportFormOpen && (
+                                                <div className="bg-slate-900 rounded-3xl p-5 border border-red-500/40 shadow-2xl animate-in slide-in-from-top-4 mb-4">
+                                                    <div className="flex justify-between items-center mb-4">
+                                                        <h5 className="text-xs font-black text-red-400 uppercase tracking-widest flex items-center gap-2"><AlertTriangle size={14} /> Сигнал за проблем</h5>
+                                                        <button onClick={() => setIsReportFormOpen(false)} className="text-slate-500"><X size={16} /></button>
+                                                    </div>
+                                                    <div className="space-y-4">
+                                                        <div className="p-3 bg-red-500/10 border border-red-500/20 rounded-xl text-[10px] text-red-200 flex gap-2">
+                                                            <Info size={14} className="shrink-0" />
+                                                            <span>Използвайте това, ако изпълнителят не отговаря или има сериозна нередност. Администратор ще разгледа сигнала и може да върне средствата ви (минус банковите такси).</span>
+                                                        </div>
+                                                        <div>
+                                                            <label className="text-[9px] font-bold text-slate-500 uppercase mb-1 block">Опишете проблема</label>
+                                                            <textarea 
+                                                                value={reportReasonInput} 
+                                                                onChange={(e) => setReportReasonInput(e.target.value)} 
+                                                                className="w-full bg-slate-950 border border-slate-800 p-3 rounded-xl text-white text-xs outline-none focus:border-red-500/50 resize-none" 
+                                                                rows={3} 
+                                                                placeholder="Напишете детайли за администратора..." 
+                                                            />
+                                                        </div>
+                                                        {task.completionImageUrl && (
+                                                            <div className="relative aspect-video rounded-xl overflow-hidden border border-indigo-500/30 group cursor-zoom-in" onClick={() => openLightbox(task.completionImageUrl!)}>
+                                                                <img 
+                                                                    key={task.completionImageUrl}
+                                                                    src={task.completionImageUrl} 
+                                                                    className="w-full h-full object-cover" 
+                                                                    alt="Completion" 
+                                                                    onError={(e) => {
+                                                                        const target = e.target as HTMLImageElement;
+                                                                        const retryCount = (target as any)._retryCount || 0;
+                                                                        if (retryCount < 3) {
+                                                                            (target as any)._retryCount = retryCount + 1;
+                                                                            setTimeout(() => {
+                                                                                const currentSrc = target.src;
+                                                                                target.src = '';
+                                                                                target.src = currentSrc;
+                                                                            }, 1500);
+                                                                        }
+                                                                    }}
+                                                                />
+                                                                <div className="absolute inset-0 bg-indigo-600/20 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center">
+                                                                    <Maximize2 className="text-white" size={24} />
+                                                                </div>
+                                                            </div>
+                                                        )}
+                                                        <button 
+                                                            onClick={handleReportProblem} 
+                                                            disabled={!reportReasonInput.trim() || isProcessingAction}
+                                                            className="w-full py-3 bg-red-600 text-white rounded-xl font-black text-xs uppercase tracking-widest shadow-lg disabled:opacity-50"
+                                                        >
+                                                            {isProcessingAction ? 'Изпращане...' : 'Изпрати сигнал до АДМИН'}
+                                                        </button>
+                                                    </div>
+                                                </div>
+                                            )}
+                                        </>
+                                    )}
+
+                                    {/* REPORTED STATUS */}
+                                    {isRequester && task.reportedByRequester && (
+                                        <div className="mb-3 p-3 bg-red-500/10 border border-red-500/20 rounded-2xl flex items-center gap-3">
+                                            <div className="w-8 h-8 bg-red-500 rounded-full flex items-center justify-center text-white shadow-lg shadow-red-500/30"><AlertTriangle size={14} /></div>
+                                            <div>
+                                                <p className="text-red-200 font-black text-[10px] uppercase tracking-wider">Сигналът е изпратен</p>
+                                                <p className="text-red-300/70 text-[9px] font-bold">Администратор ще прегледа случая.</p>
+                                            </div>
+                                        </div>
+                                    )}
+
+
+                                    {/* FINISH TASK BUTTON (Provider Only) */}
+                                    {iAmProvider && !isSubmittingWork && (
+                                        <button 
+                                            onClick={() => setIsSubmittingWork(true)} 
+                                            disabled={isProcessingAction}
+                                            className="w-full py-4 bg-gradient-to-r from-purple-600 to-indigo-600 text-white rounded-2xl font-black text-sm shadow-xl shadow-purple-500/20 flex items-center justify-center gap-2 active:scale-[0.98] transition-all disabled:opacity-50"
+                                        >
+                                            {isProcessingAction ? <Loader2 size={20} className="animate-spin" /> : <><CheckCircle size={20} /> ЗАВЪРШИХ ЗАДАЧАТА</>}
+                                        </button>
+                                    )}
+
+                                    {iAmProvider && isSubmittingWork && (
+                                        <div className="bg-slate-950 p-5 rounded-2xl border border-purple-500/30 animate-in fade-in space-y-5 mt-2">
+                                            <div className="flex justify-between items-center">
+                                                <h5 className="text-[10px] font-black text-purple-400 uppercase tracking-widest">Финализиране</h5>
+                                                <button onClick={() => setIsSubmittingWork(false)} className="text-slate-500"><X size={16} /></button>
+                                            </div>
+                                            <div className="border-2 border-dashed border-slate-800 rounded-2xl p-6 bg-slate-900/50 text-center cursor-pointer hover:border-purple-500/50 transition-colors" onClick={() => fileInputRef.current?.click()}>
+                                                <input type="file" ref={fileInputRef} onChange={(e) => handleFileChange(e, setCompletionImage)} className="hidden" accept="image/*" />
+                                                {completionImage ? (
+                                                    <div className="flex flex-col items-center gap-2">
+                                                        <img src={completionImage} className="w-20 h-20 object-cover rounded-xl border border-purple-500/30" alt="" />
+                                                        <span className="text-green-400 text-[10px] font-black">СНИМКАТА Е ПРИКАЧЕНА</span>
+                                                    </div>
+                                                ) : (
+                                                    <div className="flex flex-col items-center gap-2">
+                                                        <div className="w-10 h-10 bg-slate-800 rounded-full flex items-center justify-center text-slate-500"><Camera size={20} /></div>
+                                                        <span className="text-slate-400 text-[10px] font-black uppercase tracking-wider">Качи снимка на резултата</span>
+                                                    </div>
+                                                )}
+                                            </div>
+
+                                            <div className="space-y-3">
+                                                <p className="text-[9px] font-black text-slate-500 uppercase tracking-[0.2em] text-center">Оцени сътрудничеството</p>
+                                                <div className="flex justify-center">
+                                                    <StarRating rating={providerRateRequester} setRating={setProviderRateRequester} size={32} interactive={true} />
+                                                </div>
+                                            </div>
+
+                                            <textarea
+                                                value={providerReviewRequester}
+                                                onChange={(e) => setProviderReviewRequester(e.target.value)}
+                                                placeholder="Какво беше отношението на клиента? (незадължително)"
+                                                className="w-full p-4 bg-slate-900 border border-slate-800 rounded-2xl text-slate-100 text-xs outline-none focus:border-purple-500/50 transition-all resize-none"
+                                                rows={3}
+                                            />
+
+                                            <button 
+                                                onClick={handleProviderSubmit} 
+                                                disabled={isProcessingAction}
+                                                className="w-full py-3.5 bg-purple-600 text-white rounded-xl font-black text-xs shadow-lg shadow-purple-600/20 uppercase tracking-widest active:scale-95 transition-all flex items-center justify-center gap-2"
+                                            >
+                                                {isProcessingAction ? <Loader2 size={16} className="animate-spin" /> : 'Предай за Одобрение'}
+                                            </button>
+                                        </div>
+                                    )}
+                                </div>
+
+                                {/* MANAGEMENT TOOLS (Both sides can cancel now) */}
+                                <div className="bg-slate-900/50 rounded-3xl p-2 border border-slate-800 flex flex-wrap gap-2 mt-4">
+                                    {iAmProvider && !isSubmittingWork && (
+                                        <>
+                                            <button 
+                                                onClick={() => setIsMaterialsFormOpen(true)}
+                                                className="flex-1 min-w-[120px] p-3 bg-slate-800 hover:bg-slate-700 rounded-2xl transition-all group flex flex-col items-center gap-1"
+                                            >
+                                                <Coins size={18} className="text-blue-400 group-hover:scale-110 transition-transform" />
+                                                <span className="text-[9px] font-black text-slate-300 uppercase tracking-tighter">Материали</span>
+                                            </button>
+                                            <button 
+                                                onClick={() => setIsExtensionFormOpen(true)}
+                                                className="flex-1 min-w-[120px] p-3 bg-slate-800 hover:bg-slate-700 rounded-2xl transition-all group flex flex-col items-center gap-1"
+                                            >
+                                                <CalendarClock size={18} className="text-amber-400 group-hover:scale-110 transition-transform" />
+                                                <span className="text-[9px] font-black text-slate-300 uppercase tracking-tighter">Удължаване</span>
+                                            </button>
+                                            <button 
+                                                onClick={() => setIsCircumstanceFormOpen(true)}
+                                                className="flex-1 min-w-[120px] p-3 bg-slate-800 hover:bg-slate-700 rounded-2xl transition-all group flex flex-col items-center gap-1"
+                                            >
+                                                <AlertCircle size={18} className="text-orange-400 group-hover:scale-110 transition-transform" />
+                                                <span className="text-[9px] font-black text-slate-300 uppercase tracking-tighter">Обстоятелство</span>
+                                            </button>
+                                        </>
+                                    )}
+                                    
+                                    {/* MUTUAL CANCEL BUTTON - Visible to both */}
+                                    <button 
+                                        onClick={handleMutualCancel}
+                                        disabled={(isRequester && task.requesterAgreedCancel) || (iAmProvider && task.providerAgreedCancel)}
+                                        className={`flex-1 min-w-[120px] p-3 rounded-2xl transition-all group flex flex-col items-center gap-1 
+                                            ${cancelStep === 'CONFIRM' ? 'bg-red-600 text-white shadow-lg' : 
+                                              cancelStep === 'FORM' ? 'bg-amber-600 text-white shadow-lg' :
+                                              ((isRequester && task.requesterAgreedCancel) || (iAmProvider && task.providerAgreedCancel)) ? 'bg-slate-800/50 text-slate-600 cursor-not-allowed' :
+                                              'bg-slate-800 hover:bg-red-900/20 text-red-400'}`}
+                                    >
+                                        <FileWarning size={18} className={cancelStep !== 'IDLE' ? 'animate-pulse' : ''} />
+                                        <span className="text-[9px] font-black uppercase tracking-tighter">
+                                            {((isRequester && task.requesterAgreedCancel) || (iAmProvider && task.providerAgreedCancel)) ? 'Очаква се съгласие' :
+                                             cancelStep === 'CONFIRM' ? 'СИГУРНИ ЛИ СТЕ?' : 
+                                             cancelStep === 'FORM' ? 'НАПИШЕТЕ ПРИЧИНА' : 
+                                             'Взаимно анулиране'}
+                                        </span>
+                                    </button>
+                                </div>
+
+                                {/* ACTIVE CANCELLATION REQUEST (Visible to the side that hasn't agreed yet) */}
+                                {((isRequester && task.providerAgreedCancel && !task.requesterAgreedCancel) || 
+                                  (iAmProvider && task.requesterAgreedCancel && !task.providerAgreedCancel)) && (
+                                    <div className="bg-slate-900 rounded-3xl border border-red-500/30 p-5 shadow-xl animate-in zoom-in mt-4">
+                                        <div className="flex items-start gap-4 mb-4">
+                                            <div className="w-12 h-12 bg-red-500/10 rounded-2xl flex items-center justify-center text-red-400 shrink-0"><FileWarning size={24} /></div>
+                                            <div className="flex-1">
+                                                <h5 className="text-white font-black text-xs uppercase tracking-tight mb-1">Искане за анулиране</h5>
+                                                <p className="text-slate-400 text-[11px] leading-relaxed mb-2">От: {task.cancelInitiatedBy === task.requesterId ? 'Клиента' : 'Изпълнителя'}</p>
+                                                <div className="bg-black/20 p-3 rounded-xl border border-white/5 mb-3">
+                                                    <p className="text-[10px] text-slate-300 font-medium italic">"{task.cancelReason}"</p>
+                                                </div>
+                                                <div className="flex items-center gap-2 p-2 bg-amber-500/10 border border-amber-500/20 rounded-lg">
+                                                    <AlertCircle size={12} className="text-amber-500 shrink-0" />
+                                                    <p className="text-[8px] text-amber-200/70 uppercase font-black tracking-tight leading-tight">Таксата на сайта и банковите такси няма да бъдат възстановени.</p>
+                                                </div>
+                                            </div>
+                                        </div>
+                                        <button 
+                                            onClick={handleMutualCancel}
+                                            className="w-full py-3 bg-red-600 text-white rounded-2xl font-black text-xs uppercase tracking-widest shadow-lg shadow-red-600/20 active:scale-95 transition-all"
+                                        >
+                                            Приемам Анулирането
+                                        </button>
                                     </div>
                                 )}
-                            </div>
-                        )}
 
+
+                                {/* FORMS (Modals/Overlays) */}
+                                {isMaterialsFormOpen && (
+                                    <div className="bg-slate-900 rounded-3xl p-5 border border-blue-500/40 shadow-2xl animate-in slide-in-from-bottom-4 mt-2">
+                                        <div className="flex justify-between items-center mb-4">
+                                            <h5 className="text-xs font-black text-blue-400 uppercase tracking-widest flex items-center gap-2"><Coins size={14} /> Пари за материали</h5>
+                                            <button onClick={() => setIsMaterialsFormOpen(false)} className="text-slate-500"><X size={16} /></button>
+                                        </div>
+                                        <div className="space-y-4">
+                                            <div>
+                                                <label className="text-[9px] font-bold text-slate-500 uppercase mb-1 block">Сума (EUR)</label>
+                                                <input type="number" value={materialsAmount} onChange={(e) => setMaterialsAmount(e.target.value)} className="w-full bg-slate-950 border border-slate-800 p-3 rounded-xl text-white outline-none focus:border-blue-500/50" placeholder="0.00" />
+                                            </div>
+                                            <div>
+                                                <label className="text-[9px] font-bold text-slate-500 uppercase mb-1 block">Описание на материалите</label>
+                                                <textarea value={materialsDesc} onChange={(e) => setMaterialsDesc(e.target.value)} className="w-full bg-slate-950 border border-slate-800 p-3 rounded-xl text-white text-xs outline-none focus:border-blue-500/50 resize-none" rows={2} placeholder="Цимент, боя, инструменти..." />
+                                            </div>
+                                            <button 
+                                                onClick={handleMaterialsRequest} 
+                                                disabled={!materialsAmount || !materialsDesc || isProcessingAction}
+                                                className="w-full py-3 bg-blue-600 text-white rounded-xl font-black text-xs uppercase tracking-widest shadow-lg disabled:opacity-50"
+                                            >
+                                                {isProcessingAction ? 'Изпращане...' : 'Изпрати заявка'}
+                                            </button>
+                                        </div>
+                                    </div>
+                                )}
+
+                                {isExtensionFormOpen && (
+                                    <div className="bg-slate-900 rounded-3xl p-5 border border-amber-500/40 shadow-2xl animate-in slide-in-from-bottom-4 mt-2">
+                                        <div className="flex justify-between items-center mb-4">
+                                            <h5 className="text-xs font-black text-amber-400 uppercase tracking-widest flex items-center gap-2"><CalendarClock size={14} /> Удължаване на срока</h5>
+                                            <button onClick={() => setIsExtensionFormOpen(false)} className="text-slate-500"><X size={16} /></button>
+                                        </div>
+                                        <div className="space-y-4">
+                                            <div>
+                                                <label className="text-[9px] font-bold text-slate-500 uppercase mb-1 block">Нова крайна дата</label>
+                                                <input type="datetime-local" value={extensionDate} onChange={(e) => setExtensionDate(e.target.value)} className="w-full bg-slate-950 border border-slate-800 p-3 rounded-xl text-white outline-none focus:border-amber-500/50" style={{ colorScheme: 'dark' }} />
+                                            </div>
+                                            <div>
+                                                <label className="text-[9px] font-bold text-slate-500 uppercase mb-1 block">Причина за забавянето</label>
+                                                <textarea value={extensionReason} onChange={(e) => setExtensionReason(e.target.value)} className="w-full bg-slate-950 border border-slate-800 p-3 rounded-xl text-white text-xs outline-none focus:border-amber-500/50 resize-none" rows={2} placeholder="Наложи се допълнително време за..." />
+                                            </div>
+                                            <button 
+                                                onClick={handleExtensionRequest} 
+                                                disabled={!extensionDate || !extensionReason || isProcessingAction}
+                                                className="w-full py-3 bg-amber-500 text-white rounded-xl font-black text-xs uppercase tracking-widest shadow-lg disabled:opacity-50"
+                                            >
+                                                {isProcessingAction ? 'Изпращане...' : 'Поискай Удължаване'}
+                                            </button>
+                                        </div>
+                                    </div>
+                                )}
+
+                                {isCircumstanceFormOpen && (
+                                    <div className="bg-slate-900 rounded-3xl p-5 border border-orange-500/40 shadow-2xl animate-in slide-in-from-bottom-4 mt-2">
+                                        <div className="flex justify-between items-center mb-4">
+                                            <h5 className="text-xs font-black text-orange-400 uppercase tracking-widest flex items-center gap-2"><AlertCircle size={14} /> Непредвидено обстоятелство</h5>
+                                            <button onClick={() => setIsCircumstanceFormOpen(false)} className="text-slate-500"><X size={16} /></button>
+                                        </div>
+                                        <div className="space-y-4">
+                                            <div>
+                                                <label className="text-[9px] font-bold text-slate-500 uppercase mb-1 block">Какво се случи?</label>
+                                                <textarea value={circumstanceDesc} onChange={(e) => setCircumstanceDesc(e.target.value)} className="w-full bg-slate-950 border border-slate-800 p-3 rounded-xl text-white text-xs outline-none focus:border-orange-500/50 resize-none" rows={3} placeholder="Описание на ситуацията..." />
+                                            </div>
+                                            <div className="grid grid-cols-2 gap-3">
+                                                <div>
+                                                    <label className="text-[9px] font-bold text-slate-500 uppercase mb-1 block">Доп. заплащане (€)</label>
+                                                    <input type="number" value={circumstanceExtraPrice} onChange={(e) => setCircumstanceExtraPrice(e.target.value)} className="w-full bg-slate-950 border border-slate-800 p-3 rounded-xl text-white text-xs outline-none" placeholder="+ 0.00" />
+                                                </div>
+                                                <div>
+                                                    <label className="text-[9px] font-bold text-slate-500 uppercase mb-1 block">Нов срок (опц.)</label>
+                                                    <input type="date" value={circumstanceExtraTime} onChange={(e) => setCircumstanceExtraTime(e.target.value)} className="w-full bg-slate-950 border border-slate-800 p-3 rounded-xl text-white text-[10px] outline-none" style={{ colorScheme: 'dark' }} />
+                                                </div>
+                                            </div>
+                                            <button 
+                                                onClick={handleReportCircumstance} 
+                                                disabled={!circumstanceDesc || isProcessingAction}
+                                                className="w-full py-3 bg-orange-600 text-white rounded-xl font-black text-xs uppercase tracking-widest shadow-lg disabled:opacity-50"
+                                            >
+                                                {isProcessingAction ? 'Изпращане...' : 'Изпрати отчет'}
+                                            </button>
+                                        </div>
+                                    </div>
+                                )}
+
+                                {cancelStep === 'FORM' && (
+                                    <div className="bg-slate-900 rounded-3xl p-5 border border-red-500/40 shadow-2xl animate-in slide-in-from-bottom-4 mt-2">
+                                        <div className="flex justify-between items-center mb-4">
+                                            <h5 className="text-xs font-black text-red-400 uppercase tracking-widest flex items-center gap-2"><FileWarning size={14} /> Взаимно анулиране</h5>
+                                            <button onClick={() => setCancelStep('IDLE')} className="text-slate-500"><X size={16} /></button>
+                                        </div>
+                                        <div className="space-y-4">
+                                            <div className="p-3 bg-amber-500/10 border border-amber-500/20 rounded-xl text-[10px] text-amber-200 flex gap-2">
+                                                <Info size={14} className="shrink-0" />
+                                                <span>При взаимно анулиране, сумата се връща на клиента, но таксите на платформата и Stripe се удържат. Задачата ще бъде върната онлайн за нови оферти.</span>
+                                            </div>
+                                            <div>
+                                                <label className="text-[9px] font-bold text-slate-500 uppercase mb-1 block">Причина за анулирането</label>
+                                                <textarea 
+                                                    value={cancelReasonInput} 
+                                                    onChange={(e) => setCancelReasonInput(e.target.value)} 
+                                                    className="w-full bg-slate-950 border border-slate-800 p-3 rounded-xl text-white text-xs outline-none focus:border-red-500/50 resize-none" 
+                                                    rows={3} 
+                                                    placeholder="Опишете защо се налага анулиране..." 
+                                                />
+                                            </div>
+                                            <button 
+                                                onClick={handleMutualCancel} 
+                                                disabled={!cancelReasonInput.trim()}
+                                                className="w-full py-3 bg-red-600 text-white rounded-xl font-black text-xs uppercase tracking-widest shadow-lg disabled:opacity-50"
+                                            >
+                                                Продължи
+                                            </button>
+                                        </div>
+                                    </div>
+                                )}
+
+                                {/* MATERIALS REQUESTS & HISTORY (Visible to both) */}
+                                {task.materialsPayments && task.materialsPayments.length > 0 && (
+                                    <div className="p-4 rounded-[32px] bg-blue-500/[0.03] border border-blue-500/10 space-y-3 relative overflow-hidden">
+                                        <div className="absolute top-0 right-0 w-32 h-32 bg-blue-500/5 blur-[50px] -mr-16 -mt-16"></div>
+                                        <div className="px-1 flex items-center justify-between relative z-10">
+                                            <h5 className="text-[10px] font-black text-blue-400/60 uppercase tracking-[0.2em] flex items-center gap-2">
+                                                <Hammer size={12} /> Материали
+                                            </h5>
+                                        </div>
+                                        {task.materialsPayments.map(pay => (
+                                            <div key={pay.id} className={`relative p-[1px] rounded-[24px] bg-gradient-to-br ${pay.status === 'PAID' ? 'from-emerald-500/40 to-emerald-900/40' : 'from-blue-500/40 to-indigo-900/40'} shadow-2xl animate-in slide-in-from-right-4 group hover:scale-[1.01] transition-transform`}>
+                                                <div className="bg-slate-900 rounded-[23px] p-5">
+                                                    <div className="flex items-start gap-3 sm:gap-4 mb-4">
+                                                        <div className={`w-12 h-12 sm:w-14 sm:h-14 ${pay.status === 'PAID' ? 'bg-emerald-500/10 text-emerald-400' : 'bg-blue-500/10 text-blue-400'} rounded-2xl flex items-center justify-center shrink-0 shadow-inner group-hover:scale-110 transition-transform duration-300`}>
+                                                            {pay.status === 'PAID' ? <BadgeCheck size={24} className="sm:w-7 sm:h-7" strokeWidth={2.5} /> : <Coins size={24} className="sm:w-7 sm:h-7" strokeWidth={2.5} />}
+                                                        </div>
+                                                        <div className="flex-1 min-w-0 flex flex-col sm:flex-row sm:justify-between items-start sm:items-center gap-1.5 sm:gap-0">
+                                                            <h5 className="text-white font-black text-xs sm:text-sm uppercase tracking-tighter leading-tight truncate w-full sm:w-auto">Заявка за материали</h5>
+                                                            <div className="flex flex-col items-start sm:items-end shrink-0">
+                                                                <span className="text-xl sm:text-2xl font-black text-white leading-none">{pay.amount} €</span>
+                                                                <span className="text-[8px] text-slate-500 font-black uppercase tracking-widest mt-1">Директно плащане</span>
+                                                            </div>
+                                                        </div>
+                                                    </div>
+                                                    
+                                                    <div className="p-3 bg-slate-950/50 rounded-xl border border-slate-800/50 mb-3">
+                                                        <p className="text-slate-300 text-xs font-medium leading-relaxed italic">"{pay.description}"</p>
+                                                    </div>
+                                                    
+                                                    {pay.status === 'PAID' && (
+                                                        <div className="flex items-center gap-2 text-emerald-400 mb-3 bg-emerald-500/5 py-1.5 px-3 rounded-full border border-emerald-500/10 w-fit">
+                                                            <div className="w-1.5 h-1.5 bg-emerald-500 rounded-full animate-pulse"></div>
+                                                            <span className="text-[10px] font-black uppercase tracking-widest">Платено на {new Date(pay.paidAt || 0).toLocaleDateString('bg-BG')}</span>
+                                                        </div>
+                                                    )}
+
+                                                    {pay.status === 'REJECTED' && (
+                                                        <div className="p-3 bg-red-500/5 border border-red-500/10 rounded-xl mb-3">
+                                                            <div className="flex items-center gap-2 text-red-400 mb-1">
+                                                                <XCircle size={14} />
+                                                                <span className="text-[10px] font-black uppercase">Отказано</span>
+                                                            </div>
+                                                            <p className="text-[10px] text-slate-400 leading-tight">Причина: {pay.rejectionReason || 'Не е посочена'}</p>
+                                                        </div>
+                                                    )}
+                                                    
+                                                    {isRequester && pay.status === 'PENDING' && (
+                                                        <div className="space-y-4 pt-2">
+                                                            {rejectingItemId === pay.id && rejectionType === 'MATERIALS' ? (
+                                                                <div className="bg-slate-950 p-4 rounded-2xl border border-red-500/30 animate-in fade-in zoom-in-95 duration-200">
+                                                                    <label className="text-[9px] font-black text-red-400 uppercase tracking-widest mb-2 block">Посочете причина за отказа</label>
+                                                                    <textarea 
+                                                                        value={rejectionReason}
+                                                                        onChange={(e) => setRejectionReason(e.target.value)}
+                                                                        placeholder="Защо отказвате тази заявка?"
+                                                                        className="w-full bg-slate-900 border border-slate-800 rounded-xl p-3 text-white text-[11px] mb-3 focus:border-red-500/50 outline-none transition-all min-h-[80px]"
+                                                                    />
+                                                                    <div className="flex gap-2">
+                                                                        <button 
+                                                                            onClick={() => { setRejectingItemId(null); setRejectionType(null); setRejectionReason(''); }}
+                                                                            className="flex-1 py-3 bg-slate-800 text-slate-400 rounded-xl font-black text-[10px] uppercase tracking-widest"
+                                                                        >
+                                                                            Назад
+                                                                        </button>
+                                                                        <button 
+                                                                            disabled={!rejectionReason.trim() || isProcessingAction}
+                                                                            onClick={handleRejectionSubmit}
+                                                                            className="flex-[2] py-3 bg-red-600 text-white rounded-xl font-black text-[10px] uppercase tracking-widest shadow-lg shadow-red-600/20 active:scale-95 disabled:opacity-50 transition-all"
+                                                                        >
+                                                                            {isProcessingAction ? 'Изпращане...' : 'Потвърди Отказа'}
+                                                                        </button>
+                                                                    </div>
+                                                                </div>
+                                                            ) : (
+                                                                <div className="flex gap-2">
+                                                                    <button 
+                                                                        onClick={(e) => {
+                                                                            e.preventDefault();
+                                                                            e.stopPropagation();
+                                                                            setRejectingItemId(pay.id);
+                                                                            setRejectionType('MATERIALS');
+                                                                            setRejectionReason('');
+                                                                        }}
+                                                                        className="flex-1 py-4 bg-slate-800 text-slate-400 rounded-2xl font-black text-[10px] uppercase tracking-widest shadow-xl shadow-slate-900/30 active:scale-95 hover:bg-red-500/10 hover:text-red-400 transition-all flex items-center justify-center"
+                                                                    >
+                                                                        Откажи
+                                                                    </button>
+                                                                    <button 
+                                                                        onClick={(e) => {
+                                                                            e.preventDefault();
+                                                                            e.stopPropagation();
+                                                                            window.dispatchEvent(new CustomEvent('NEEDO_PAYMENT_TRIGGERED', { detail: { taskId: task.id, paymentId: pay.id } }));
+                                                                            console.log("Premium Pay Button Clicked!", { taskId: task.id, paymentId: pay.id });
+                                                                            onPayMaterials?.(task.id, pay.id);
+                                                                        }}
+                                                                        className="flex-[2] py-4 bg-gradient-to-r from-blue-600 to-indigo-600 text-white rounded-2xl font-black text-xs uppercase tracking-[0.2em] shadow-xl shadow-blue-600/30 active:scale-95 hover:brightness-110 transition-all flex items-center justify-center gap-3"
+                                                                    >
+                                                                        <CreditCard size={18} />
+                                                                        Плати Сега
+                                                                    </button>
+                                                                </div>
+                                                            )}
+                                                            <div className="p-3 bg-amber-500/5 border border-amber-500/20 rounded-2xl flex gap-3 items-center">
+                                                                <div className="w-8 h-8 bg-amber-500/10 rounded-full flex items-center justify-center shrink-0">
+                                                                    <Info size={14} className="text-amber-500" />
+                                                                </div>
+                                                                <p className="text-[10px] text-amber-200/60 font-bold leading-snug">
+                                                                    Тези средства се превеждат <span className="text-amber-400 uppercase">директно</span> на изпълнителя. Needo не задържа тези пари в ескроу и не носи отговорност за тях.
+                                                                </p>
+                                                            </div>
+                                                        </div>
+                                                    )}
+                                                    {iAmProvider && pay.status === 'PENDING' && (
+                                                        <div className="w-full py-3 bg-slate-800/50 rounded-2xl text-center border border-slate-700/50 flex items-center justify-center gap-2 mt-2">
+                                                            <Loader2 size={12} className="animate-spin text-blue-400" />
+                                                            <span className="text-[9px] font-black text-slate-400 uppercase tracking-widest">Очаква се плащане от клиента...</span>
+                                                        </div>
+                                                    )}
+                                                </div>
+                                            </div>
+                                        ))}
+                                    </div>
+                                )}
+
+                                {/* EXTENSIONS HISTORY */}
+                                {task.extensionRequests && task.extensionRequests.length > 0 && (
+                                    <div className="p-4 rounded-[32px] bg-amber-500/[0.03] border border-amber-500/10 space-y-3 relative overflow-hidden mt-4">
+                                        <div className="absolute top-0 right-0 w-32 h-32 bg-amber-500/5 blur-[50px] -mr-16 -mt-16"></div>
+                                        <div className="px-1 flex items-center justify-between relative z-10">
+                                            <h5 className="text-[10px] font-black text-amber-400/60 uppercase tracking-[0.2em] flex items-center gap-2">
+                                                <CalendarClock size={12} /> Удължавания
+                                            </h5>
+                                        </div>
+                                        {task.extensionRequests.map(req => (
+                                            <div key={req.id} className={`bg-slate-900 rounded-3xl border ${req.status === 'APPROVED' ? 'border-emerald-500/30' : req.status === 'REJECTED' ? 'border-red-500/30' : 'border-amber-500/30'} p-5 shadow-xl animate-in slide-in-from-right-4 relative z-10`}>
+                                                <div className="flex items-start gap-4 mb-4">
+                                                    <div className={`w-12 h-12 rounded-2xl flex items-center justify-center shrink-0 ${req.status === 'APPROVED' ? 'bg-emerald-500/10 text-emerald-400' : req.status === 'REJECTED' ? 'bg-red-500/10 text-red-400' : 'bg-amber-500/10 text-amber-400'}`}>
+                                                        <CalendarClock size={24} />
+                                                    </div>
+                                                    <div className="flex-1">
+                                                        <div className="flex justify-between items-start mb-1">
+                                                            <h5 className="text-white font-black text-xs uppercase tracking-tight">Заявка за удължаване</h5>
+                                                            {req.status === 'APPROVED' && <span className="text-[9px] font-black text-emerald-400 uppercase tracking-widest bg-emerald-500/10 px-2 py-1 rounded-full">Одобрено</span>}
+                                                            {req.status === 'REJECTED' && <span className="text-[9px] font-black text-red-400 uppercase tracking-widest bg-red-500/10 px-2 py-1 rounded-full">Отказано</span>}
+                                                        </div>
+                                                        <p className="text-slate-400 text-[11px] leading-relaxed mb-1">{req.reason}</p>
+                                                        {req.status === 'REJECTED' && req.rejectionReason && (
+                                                            <p className="text-red-400/70 text-[9px] italic mt-1 font-medium">Отказ: {req.rejectionReason}</p>
+                                                        )}
+                                                        <div className="flex items-center gap-1.5 mt-2">
+                                                            <span className="text-[9px] text-slate-500 uppercase font-black">НОВА ДАТА:</span>
+                                                            <span className={`text-[10px] font-bold ${req.status === 'APPROVED' ? 'text-emerald-400' : 'text-amber-400'}`}>{new Date(req.newDate).toLocaleString('bg-BG')}</span>
+                                                        </div>
+                                                    </div>
+                                                </div>
+                                                
+                                                {isRequester && req.status === 'PENDING' && (
+                                                    <div className="flex flex-col gap-3">
+                                                        {rejectingItemId === req.id && rejectionType === 'EXTENSION' ? (
+                                                            <div className="bg-slate-950 p-4 rounded-2xl border border-red-500/30 animate-in fade-in zoom-in-95 duration-200">
+                                                                <label className="text-[9px] font-black text-red-400 uppercase tracking-widest mb-2 block">Причина за отказа</label>
+                                                                <textarea 
+                                                                    value={rejectionReason}
+                                                                    onChange={(e) => setRejectionReason(e.target.value)}
+                                                                    placeholder="Обяснете защо отказвате..."
+                                                                    className="w-full bg-slate-900 border border-slate-800 rounded-xl p-3 text-white text-[11px] mb-3 focus:border-red-500/50 outline-none transition-all min-h-[60px]"
+                                                                />
+                                                                <div className="flex gap-2">
+                                                                    <button 
+                                                                        onClick={() => { setRejectingItemId(null); setRejectionType(null); setRejectionReason(''); }}
+                                                                        className="flex-1 py-3 bg-slate-800 text-slate-400 rounded-xl font-black text-[10px] uppercase tracking-widest"
+                                                                    >
+                                                                        Назад
+                                                                    </button>
+                                                                    <button 
+                                                                        disabled={!rejectionReason.trim() || isProcessingAction}
+                                                                        onClick={handleRejectionSubmit}
+                                                                        className="flex-[2] py-3 bg-red-600 text-white rounded-xl font-black text-[10px] uppercase tracking-widest shadow-lg active:scale-95 disabled:opacity-50 transition-all"
+                                                                    >
+                                                                        {isProcessingAction ? 'Изпращане...' : 'Потвърди'}
+                                                                    </button>
+                                                                </div>
+                                                            </div>
+                                                        ) : (
+                                                            <div className="flex gap-2">
+                                                                <button 
+                                                                    onClick={() => {
+                                                                        setRejectingItemId(req.id);
+                                                                        setRejectionType('EXTENSION');
+                                                                        setRejectionReason('');
+                                                                    }}
+                                                                    className="flex-1 py-3 bg-slate-800 text-slate-400 rounded-2xl font-black text-[10px] uppercase tracking-widest border border-slate-700 active:scale-95 transition-all hover:bg-red-500/10 hover:text-red-400"
+                                                                >
+                                                                    Откажи
+                                                                </button>
+                                                                <button 
+                                                                    onClick={() => onHandleExtension?.(task.id, req.id, 'ACCEPT')}
+                                                                    className="flex-[2] py-3 bg-amber-500 text-white rounded-2xl font-black text-[10px] uppercase tracking-widest shadow-lg active:scale-95 transition-all hover:brightness-110"
+                                                                >
+                                                                    Приеми Новата Дата
+                                                                </button>
+                                                            </div>
+                                                        )}
+                                                    </div>
+                                                )}
+                                                {iAmProvider && req.status === 'PENDING' && (
+                                                    <div className="w-full py-3 bg-slate-800/50 rounded-2xl text-center border border-slate-700/50 flex items-center justify-center gap-2">
+                                                        <Loader2 size={12} className="animate-spin text-amber-400" />
+                                                        <span className="text-[9px] font-black text-slate-400 uppercase tracking-widest">Очаква се отговор от клиента...</span>
+                                                    </div>
+                                                )}
+                                            </div>
+                                        ))}
+                                    </div>
+                                )}
+
+                                {/* CIRCUMSTANCES HISTORY */}
+                                {task.circumstances && task.circumstances.length > 0 && (
+                                    <div className="p-4 rounded-[32px] bg-orange-500/[0.03] border border-orange-500/10 space-y-3 relative overflow-hidden mt-4">
+                                        <div className="absolute top-0 right-0 w-32 h-32 bg-orange-500/5 blur-[50px] -mr-16 -mt-16"></div>
+                                        <div className="px-1 flex items-center justify-between relative z-10">
+                                            <h5 className="text-[10px] font-black text-orange-400/60 uppercase tracking-[0.2em] flex items-center gap-2">
+                                                <AlertCircle size={12} /> Обстоятелства
+                                            </h5>
+                                        </div>
+                                        {task.circumstances.map(circ => (
+                                            <div key={circ.id} className={`bg-slate-900 rounded-3xl border ${circ.status === 'APPROVED' ? 'border-emerald-500/30' : circ.status === 'REJECTED' ? 'border-red-500/30' : 'border-orange-500/30'} p-5 shadow-xl animate-in slide-in-from-right-4 relative z-10`}>
+                                                <div className="flex items-start gap-4 mb-4">
+                                                    <div className={`w-12 h-12 rounded-2xl flex items-center justify-center shrink-0 ${circ.status === 'APPROVED' ? 'bg-emerald-500/10 text-emerald-400' : circ.status === 'REJECTED' ? 'bg-red-500/10 text-red-400' : 'bg-orange-500/10 text-orange-400'}`}>
+                                                        <AlertCircle size={24} />
+                                                    </div>
+                                                    <div className="flex-1">
+                                                        <div className="flex justify-between items-start mb-1">
+                                                            <h5 className="text-white font-black text-xs uppercase tracking-tight">Непредвидено обстоятелство</h5>
+                                                            {circ.status === 'APPROVED' && <span className="text-[9px] font-black text-emerald-400 uppercase tracking-widest bg-emerald-500/10 px-2 py-1 rounded-full">Одобрено</span>}
+                                                            {circ.status === 'REJECTED' && <span className="text-[9px] font-black text-red-400 uppercase tracking-widest bg-red-500/10 px-2 py-1 rounded-full">Отказано</span>}
+                                                        </div>
+                                                        <p className="text-slate-400 text-[11px] leading-relaxed mb-3">{circ.description}</p>
+                                                        {circ.status === 'REJECTED' && circ.rejectionReason && (
+                                                            <p className="text-red-400/70 text-[9px] italic mt-1 font-medium">Отказ: {circ.rejectionReason}</p>
+                                                        )}
+                                                        
+                                                        {circ.requestedPrice && (
+                                                            <div className="p-3 bg-slate-950 rounded-xl border border-slate-800/50 mb-2">
+                                                                <div className="flex justify-between items-center">
+                                                                    <span className="text-[9px] text-slate-500 font-black uppercase">Искано доплащане</span>
+                                                                    <span className={`text-sm font-black ${circ.status === 'APPROVED' ? 'text-emerald-400' : 'text-white'}`}>+ {circ.requestedPrice} €</span>
+                                                                </div>
+                                                                {circ.status === 'PENDING' && <p className="text-[8px] text-slate-600 mt-1 uppercase tracking-tight">Сумата се задържа в ескроу до края</p>}
+                                                            </div>
+                                                        )}
+                                                        {circ.requestedExtension && (
+                                                            <div className="p-3 bg-slate-950 rounded-xl border border-slate-800/50">
+                                                                <div className="flex justify-between items-center">
+                                                                    <span className="text-[9px] text-slate-500 font-black uppercase">Искано удължаване</span>
+                                                                    <span className={`text-[10px] font-black ${circ.status === 'APPROVED' ? 'text-emerald-400' : 'text-white'}`}>{new Date(circ.requestedExtension).toLocaleDateString('bg-BG')}</span>
+                                                                </div>
+                                                            </div>
+                                                        )}
+                                                    </div>
+                                                </div>
+                                                
+                                                {isRequester && circ.status === 'PENDING' && (
+                                                    <div className="flex flex-col gap-3">
+                                                        {rejectingItemId === circ.id && rejectionType === 'CIRCUMSTANCE' ? (
+                                                            <div className="bg-slate-950 p-4 rounded-2xl border border-red-500/30 animate-in fade-in zoom-in-95 duration-200">
+                                                                <label className="text-[9px] font-black text-red-400 uppercase tracking-widest mb-2 block">Причина за отказа</label>
+                                                                <textarea 
+                                                                    value={rejectionReason}
+                                                                    onChange={(e) => setRejectionReason(e.target.value)}
+                                                                    placeholder="Обяснете защо отказвате..."
+                                                                    className="w-full bg-slate-900 border border-slate-800 rounded-xl p-3 text-white text-[11px] mb-3 focus:border-red-500/50 outline-none transition-all min-h-[60px]"
+                                                                />
+                                                                <div className="flex gap-2">
+                                                                    <button 
+                                                                        onClick={() => { setRejectingItemId(null); setRejectionType(null); setRejectionReason(''); }}
+                                                                        className="flex-1 py-3 bg-slate-800 text-slate-400 rounded-xl font-black text-[10px] uppercase tracking-widest"
+                                                                    >
+                                                                        Назад
+                                                                    </button>
+                                                                    <button 
+                                                                        disabled={!rejectionReason.trim() || isProcessingAction}
+                                                                        onClick={handleRejectionSubmit}
+                                                                        className="flex-[2] py-3 bg-red-600 text-white rounded-xl font-black text-[10px] uppercase tracking-widest shadow-lg active:scale-95 disabled:opacity-50 transition-all"
+                                                                    >
+                                                                        {isProcessingAction ? 'Изпращане...' : 'Потвърди'}
+                                                                    </button>
+                                                                </div>
+                                                            </div>
+                                                        ) : (
+                                                            <div className="flex gap-2">
+                                                                <button 
+                                                                    onClick={() => {
+                                                                        setRejectingItemId(circ.id);
+                                                                        setRejectionType('CIRCUMSTANCE');
+                                                                        setRejectionReason('');
+                                                                    }}
+                                                                    >
+                                                                    Откажи
+                                                                </button>
+                                                                <button 
+                                                                    onClick={() => onHandleCircumstance?.(task.id, circ.id, 'ACCEPT')}
+                                                                    className="flex-[2] py-3 bg-orange-600 text-white rounded-2xl font-black text-[10px] uppercase tracking-widest shadow-lg active:scale-95 transition-all hover:brightness-110"
+                                                                >
+                                                                    Приеми
+                                                                </button>
+                                                            </div>
+                                                        )}
+                                                    </div>
+                                                ))}
+                                            </div>
+                                        )}
+                                    </div>
+                                )}
                         {task.status === TaskStatus.IN_REVIEW && (
                             <div className="mt-6 mb-4 bg-slate-900 rounded-2xl border border-indigo-500/20 p-5 shadow-sm space-y-4">
                                 <div className="flex items-center gap-3">
@@ -641,13 +1546,25 @@ export const TaskSidebar: React.FC<TaskSidebarProps> = ({
                                 )}
 
                                 {isRequester && !isApproving && (
-                                    <button onClick={() => setIsApproving(true)} className="w-full py-3 bg-green-500 text-white rounded-xl font-bold text-sm shadow-lg flex items-center justify-center gap-2"><CheckCircle size={18} /> Прегледай и Оцени</button>
+                                    <button 
+                                        onClick={() => setIsApproving(true)} 
+                                        disabled={isProcessingAction}
+                                        className="w-full py-3 bg-green-500 text-white rounded-xl font-bold text-sm shadow-lg flex items-center justify-center gap-2 disabled:opacity-50"
+                                    >
+                                        {isProcessingAction ? <Loader2 size={18} className="animate-spin" /> : <><CheckCircle size={18} /> Прегледай и Оцени</>}
+                                    </button>
                                 )}
                                 {isRequester && isApproving && (
                                     <div className="bg-slate-950 p-4 rounded-xl border border-green-500/30 animate-in fade-in">
                                         <div className="mb-4 flex justify-center"><StarRating rating={requesterRateProvider} setRating={setRequesterRateProvider} size={32} interactive={true} /></div>
                                         <textarea value={requesterReviewProvider} onChange={(e) => setRequesterReviewProvider(e.target.value)} placeholder="Напишете отзив за майстора..." className="w-full p-3 bg-slate-900 border border-slate-700 rounded-xl text-slate-100 text-base mb-3 outline-none" rows={3} />
-                                        <button onClick={handleRequesterApprove} className="w-full py-3 bg-green-500 text-white rounded-xl font-bold text-sm shadow-md">Освободи Плащането</button>
+                                        <button 
+                                            onClick={handleRequesterApprove} 
+                                            disabled={isProcessingAction}
+                                            className="w-full py-3 bg-green-500 text-white rounded-xl font-bold text-sm shadow-md flex items-center justify-center gap-2"
+                                        >
+                                            {isProcessingAction ? <Loader2 size={18} className="animate-spin" /> : 'Освободи Плащането'}
+                                        </button>
                                     </div>
                                 )}
                             </div>
@@ -727,7 +1644,10 @@ export const TaskSidebar: React.FC<TaskSidebarProps> = ({
                                                 const minTime = validTimestamps.length > 0 ? Math.min(...validTimestamps) : 0;
 
                                                 return offers.map((offer, index) => {
-                                                    const { average, count } = getProviderRating(offer.providerId);
+                                                    const liveProfile = providerProfiles[offer.providerId];
+                                                    const { average, count } = liveProfile 
+                                                        ? { average: liveProfile.rating || 0, count: liveProfile.reviewCount || 0 }
+                                                        : getProviderRating(offer.providerId);
                                                     const isAccepted = task.acceptedOfferId === offer.id;
                                                     const isCompany = offer.providerIsCompany;
 
@@ -894,74 +1814,96 @@ export const TaskSidebar: React.FC<TaskSidebarProps> = ({
                                     <div className="space-y-4 max-h-[60vh] overflow-y-auto scrollbar-hide pb-4">
 
                                         {/* OFFER TYPE SELECTION */}
-                                        <div>
-                                            <label className="text-[10px] font-bold text-emerald-100/70 uppercase mb-1.5 block">{t('mo_type_label')}</label>
-                                            <div className="flex bg-black/20 rounded-xl p-1 border border-white/10 mb-2">
-                                                <button onClick={() => setIsCompanyOffer(false)} className={`flex-1 py-3 rounded-lg text-xs font-bold transition-all flex items-center justify-center gap-2 ${!isCompanyOffer ? 'bg-white text-slate-900 shadow-md' : 'text-slate-400 hover:text-white'}`}>
-                                                    <UserIcon size={14} /> {t('mo_type_private')}
-                                                </button>
-                                                <button onClick={() => setIsCompanyOffer(true)} className={`flex-1 py-3 rounded-lg text-xs font-bold transition-all flex items-center justify-center gap-2 ${isCompanyOffer ? 'bg-blue-600 text-white shadow-md' : 'text-slate-400 hover:text-white'}`}>
-                                                    <Building2 size={14} /> {t('mo_type_company')}
-                                                </button>
-                                            </div>
-                                            <div className={`p-3 rounded-xl border text-[10px] leading-relaxed animate-in fade-in duration-300 ${isCompanyOffer ? 'bg-blue-500/10 border-blue-500/20 text-blue-200' : 'bg-emerald-500/10 border-emerald-500/20 text-emerald-200'}`}>
-                                                <div className="flex gap-2">
-                                                    <Info size={14} className="shrink-0" />
-                                                    <span>{isCompanyOffer ? t('mo_type_company_desc') : t('mo_type_private_desc')}</span>
-                                                </div>
-                                            </div>
-                                        </div>
+                                         <div>
+                                             <label className="text-[10px] font-bold text-emerald-100/70 uppercase mb-1.5 block">Подай оферта като:</label>
+                                             <div className="flex bg-black/20 rounded-xl p-1 border border-white/10 mb-2">
+                                                 <button 
+                                                     disabled={!me?.stripeOnboardingComplete_individual && !me?.stripeOnboardingComplete}
+                                                     onClick={() => setIsCompanyOffer(false)} 
+                                                     className={`flex-1 py-3 rounded-lg text-xs font-bold transition-all flex items-center justify-center gap-2 ${!isCompanyOffer ? 'bg-white text-slate-900 shadow-md' : 'text-slate-400 hover:text-white disabled:opacity-30'}`}
+                                                 >
+                                                     <UserIcon size={14} /> Лице
+                                                 </button>
+                                                 <button 
+                                                     disabled={!me?.stripeOnboardingComplete_company}
+                                                     onClick={() => setIsCompanyOffer(true)} 
+                                                     className={`flex-1 py-3 rounded-lg text-xs font-bold transition-all flex items-center justify-center gap-2 ${isCompanyOffer ? 'bg-blue-600 text-white shadow-md' : 'text-slate-400 hover:text-white disabled:opacity-30'}`}
+                                                 >
+                                                     <Building2 size={14} /> Фирма
+                                                 </button>
+                                             </div>
+                                             
+                                             {/* Warning if no account connected */}
+                                             {!me?.stripeOnboardingComplete_individual && !me?.stripeOnboardingComplete && !me?.stripeOnboardingComplete_company && (
+                                                 <div className="p-3 bg-amber-500/10 border border-amber-500/20 rounded-xl text-[10px] text-amber-200 flex gap-2">
+                                                     <AlertTriangle size={14} className="shrink-0" />
+                                                     <span>Трябва да свържете поне една сметка в Stripe (Лична или Фирмена) в своя профил, за да подадете оферта.</span>
+                                                 </div>
+                                             )}
+                                             
+                                             {isCompanyOffer && !me?.stripeOnboardingComplete_company && (
+                                                 <div className="p-3 bg-blue-500/10 border border-blue-500/20 rounded-xl text-[10px] text-blue-200 flex gap-2">
+                                                     <Info size={14} className="shrink-0" />
+                                                     <span>Нямате свързан фирмен акаунт. Направете го в своя профил в секция Финанси.</span>
+                                                 </div>
+                                             )}
+                                         </div>
 
-                                        <div><label className="text-[10px] font-bold text-emerald-100/70 uppercase mb-1.5 block">{t('mo_price')} (EUR)</label><div className="relative"><span className="absolute left-4 top-1/2 -translate-y-1/2 font-bold text-emerald-400">€</span><input type="number" value={offerPrice} onChange={(e) => setOfferPrice(e.target.value)} className="w-full pl-14 pr-4 py-3 bg-black/20 border border-emerald-500/20 rounded-xl font-bold text-white focus:border-emerald-400 outline-none text-base placeholder-emerald-700/50" placeholder="0.00" autoFocus /></div></div>
-                                        <div className="flex gap-3"><div className="flex-1"><label className="text-[10px] font-bold text-emerald-100/70 uppercase mb-1.5 block">{t('mo_duration')}</label><input type="number" value={durationValue} onChange={(e) => setDurationValue(e.target.value)} className="w-full p-3 bg-black/20 border border-emerald-500/20 rounded-xl font-bold text-white focus:border-emerald-400 outline-none text-base placeholder-emerald-700/50" placeholder="3" /></div><div className="w-1/3"><label className="text-[10px] font-bold text-emerald-100/70 uppercase mb-1.5 block">&nbsp;</label><div className="flex bg-black/20 rounded-xl border border-emerald-500/20 p-1"><button onClick={() => setDurationUnit('hours')} className={`flex-1 py-2 text-xs font-bold rounded-lg ${durationUnit === 'hours' ? 'bg-emerald-600 text-white' : 'text-emerald-200/60'}`}>{t('mo_unit_hours')}</button><button onClick={() => setDurationUnit('days')} className={`flex-1 py-2 text-xs font-bold rounded-lg ${durationUnit === 'days' ? 'bg-emerald-600 text-white' : 'text-emerald-200/60'}`}>{t('mo_unit_days')}</button></div></div></div>
-                                        <div><label className="text-[10px] font-bold text-emerald-100/70 uppercase mb-1.5 block">{t('mo_start_date')}</label><div className="relative w-full"><input type="datetime-local" value={offerDateTime} onChange={(e) => setOfferDateTime(e.target.value)} className="w-full p-3 pl-10 bg-black/20 border border-emerald-500/20 rounded-xl font-bold text-white focus:border-emerald-400 outline-none text-base placeholder-emerald-700/50" style={{ minHeight: '46px', colorScheme: 'dark' }} /><CalendarClock className="absolute left-3 top-1/2 -translate-y-1/2 text-emerald-400 pointer-events-none" size={18} /></div></div>
-                                        {!isAiAssistOpen && <div className="flex justify-end"><button onClick={startAiAssist} className="text-xs font-bold text-emerald-300 hover:text-white flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-emerald-500/30"><Wand2 size={14} /> ✨ {t('mo_ai_btn')}</button></div>}
-                                        {isAiAssistOpen && <div className="bg-black/30 rounded-xl p-4 border border-emerald-500/40 mb-3 animate-in fade-in"><div className="relative z-10"><h4 className="text-xs font-black text-emerald-400 uppercase tracking-widest mb-2 flex items-center gap-1.5"><Wand2 size={12} /> {t('mo_ai_title')}</h4>{isAiLoading && !aiQuestion && <div className="flex items-center gap-2 text-xs text-emerald-300 py-2"><div className="w-4 h-4 border-2 border-emerald-500 border-t-transparent rounded-full animate-spin"></div> {t('mo_ai_analyzing')}</div>}{aiQuestion && <><p className="text-sm font-medium text-white mb-3 italic">"{aiQuestion}"</p><div className="flex gap-2"><input type="text" value={providerAiAnswer} onChange={(e) => setProviderAiAnswer(e.target.value)} placeholder={t('mo_ai_ph')} className="flex-1 bg-black/40 border border-emerald-500/30 rounded-lg px-3 py-2 text-base text-white focus:border-emerald-400 outline-none" /><button onClick={generateDescription} disabled={!providerAiAnswer.trim() || isAiLoading} className="bg-emerald-600 text-white rounded-lg px-3 py-2 text-xs font-bold disabled:opacity-50 shrink-0">{isAiLoading ? '...' : t('mo_ai_generate')}</button></div></>}</div></div>}
-                                        <div>
-                                            <label className="text-[10px] font-bold text-emerald-100/70 uppercase mb-1.5 block">{t('mo_desc_label')}</label>
-                                            <div className="relative group">
-                                                <textarea
-                                                    value={offerDescription}
-                                                    onChange={(e) => setOfferDescription(e.target.value)}
-                                                    className="w-full p-3 bg-black/20 border border-emerald-500/20 rounded-xl font-medium text-base text-white outline-none resize-none focus:border-emerald-400"
-                                                    rows={4}
-                                                    placeholder={t('mo_desc_ph')}
-                                                />
-                                                {/* CHARACTER COUNTER */}
-                                                <div className="flex justify-end mt-1.5">
-                                                    {offerDescription.length < 20 ? (
-                                                        <div className="flex items-center gap-1.5 text-[10px] font-bold text-orange-400 animate-pulse bg-orange-400/10 px-2 py-1 rounded-md">
-                                                            <AlertCircle size={10} />
-                                                            <span>{20 - offerDescription.length} {t('mo_chars_left')}</span>
-                                                        </div>
-                                                    ) : (
-                                                        <div className="flex items-center gap-1.5 text-[10px] font-bold text-emerald-400 bg-emerald-400/10 px-2 py-1 rounded-md">
-                                                            <CheckCircle size={10} />
-                                                            <span>{t('mo_ready')}</span>
-                                                        </div>
-                                                    )}
-                                                </div>
-                                            </div>
-                                        </div>
-                                        <button
-                                            onClick={handleOfferSubmit}
-                                            disabled={!offerPrice || !durationValue || !offerDateTime || offerDescription.length < 20}
-                                            className="
-                                                w-full py-4 mt-6
-                                                bg-slate-950 text-white 
-                                                rounded-[22px] font-black text-lg 
-                                                shadow-[0_10px_30px_-5px_rgba(0,0,0,0.5)] 
-                                                hover:scale-[1.02] active:scale-[0.98] 
-                                                disabled:opacity-40 disabled:scale-100
-                                                transition-all flex items-center justify-center gap-3 
-                                                group border border-emerald-500/30
-                                            "
-                                        >
-                                            <span className="uppercase tracking-widest">{t('btn_make_offer')}</span>
-                                            <div className="bg-emerald-500/20 p-1.5 rounded-full group-hover:bg-emerald-500/40 transition-colors">
-                                                <ArrowRight size={18} className="group-hover:translate-x-1 transition-transform text-emerald-400" />
-                                            </div>
-                                        </button>
+                                         <div><label className="text-[10px] font-bold text-emerald-100/70 uppercase mb-1.5 block">{t('mo_price')} (EUR)</label><div className="relative"><span className="absolute left-4 top-1/2 -translate-y-1/2 font-bold text-emerald-400">€</span><input type="number" value={offerPrice} onChange={(e) => setOfferPrice(e.target.value)} className="w-full pl-14 pr-4 py-3 bg-black/20 border border-emerald-500/20 rounded-xl font-bold text-white focus:border-emerald-400 outline-none text-base placeholder-emerald-700/50" placeholder="0.00" autoFocus /></div></div>
+                                         <div className="flex gap-3"><div className="flex-1"><label className="text-[10px] font-bold text-emerald-100/70 uppercase mb-1.5 block">{t('mo_duration')}</label><input type="number" value={durationValue} onChange={(e) => setDurationValue(e.target.value)} className="w-full p-3 bg-black/20 border border-emerald-500/20 rounded-xl font-bold text-white focus:border-emerald-400 outline-none text-base placeholder-emerald-700/50" placeholder="3" /></div><div className="w-1/3"><label className="text-[10px] font-bold text-emerald-100/70 uppercase mb-1.5 block">&nbsp;</label><div className="flex bg-black/20 rounded-xl border border-emerald-500/20 p-1"><button onClick={() => setDurationUnit('hours')} className={`flex-1 py-2 text-xs font-bold rounded-lg ${durationUnit === 'hours' ? 'bg-emerald-600 text-white' : 'text-emerald-200/60'}`}>{t('mo_unit_hours')}</button><button onClick={() => setDurationUnit('days')} className={`flex-1 py-2 text-xs font-bold rounded-lg ${durationUnit === 'days' ? 'bg-emerald-600 text-white' : 'text-emerald-200/60'}`}>{t('mo_unit_days')}</button></div></div></div>
+                                         <div><label className="text-[10px] font-bold text-emerald-100/70 uppercase mb-1.5 block">{t('mo_start_date')}</label><div className="relative w-full"><input type="datetime-local" value={offerDateTime} onChange={(e) => setOfferDateTime(e.target.value)} className="w-full p-3 pl-10 bg-black/20 border border-emerald-500/20 rounded-xl font-bold text-white focus:border-emerald-400 outline-none text-base placeholder-emerald-700/50" style={{ minHeight: '46px', colorScheme: 'dark' }} /><CalendarClock className="absolute left-3 top-1/2 -translate-y-1/2 text-emerald-400 pointer-events-none" size={18} /></div></div>
+                                         {!isAiAssistOpen && <div className="flex justify-end"><button onClick={startAiAssist} className="text-xs font-bold text-emerald-300 hover:text-white flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-emerald-500/30"><Wand2 size={14} /> ✨ {t('mo_ai_btn')}</button></div>}
+                                         {isAiAssistOpen && <div className="bg-black/30 rounded-xl p-4 border border-emerald-500/40 mb-3 animate-in fade-in"><div className="relative z-10"><h4 className="text-xs font-black text-emerald-400 uppercase tracking-widest mb-2 flex items-center gap-1.5"><Wand2 size={12} /> {t('mo_ai_title')}</h4>{isAiLoading && !aiQuestion && <div className="flex items-center gap-2 text-xs text-emerald-300 py-2"><div className="w-4 h-4 border-2 border-emerald-500 border-t-transparent rounded-full animate-spin"></div> {t('mo_ai_analyzing')}</div>}{aiQuestion && <><p className="text-sm font-medium text-white mb-3 italic">"{aiQuestion}"</p><div className="flex gap-2"><input type="text" value={providerAiAnswer} onChange={(e) => setProviderAiAnswer(e.target.value)} placeholder={t('mo_ai_ph')} className="flex-1 bg-black/40 border border-emerald-500/30 rounded-lg px-3 py-2 text-base text-white focus:border-emerald-400 outline-none" /><button onClick={generateDescription} disabled={!providerAiAnswer.trim() || isAiLoading} className="bg-emerald-600 text-white rounded-lg px-3 py-2 text-xs font-bold disabled:opacity-50 shrink-0">{isAiLoading ? '...' : t('mo_ai_generate')}</button></div></>}</div></div>}
+                                         <div>
+                                             <label className="text-[10px] font-bold text-emerald-100/70 uppercase mb-1.5 block">{t('mo_desc_label')}</label>
+                                             <div className="relative group">
+                                                 <textarea
+                                                     value={offerDescription}
+                                                     onChange={(e) => setOfferDescription(e.target.value)}
+                                                     className="w-full p-3 bg-black/20 border border-emerald-500/20 rounded-xl font-medium text-base text-white outline-none resize-none focus:border-emerald-400"
+                                                     rows={4}
+                                                     placeholder={t('mo_desc_ph')}
+                                                 />
+                                                 {/* CHARACTER COUNTER */}
+                                                 <div className="flex justify-end mt-1.5">
+                                                     {offerDescription.length < 20 ? (
+                                                         <div className="flex items-center gap-1.5 text-[10px] font-bold text-orange-400 animate-pulse bg-orange-400/10 px-2 py-1 rounded-md">
+                                                             <AlertCircle size={10} />
+                                                             <span>{20 - offerDescription.length} {t('mo_chars_left')}</span>
+                                                         </div>
+                                                     ) : (
+                                                         <div className="flex items-center gap-1.5 text-[10px] font-bold text-emerald-400 bg-emerald-400/10 px-2 py-1 rounded-md">
+                                                             <CheckCircle size={10} />
+                                                             <span>{t('mo_ready')}</span>
+                                                         </div>
+                                                     )}
+                                                 </div>
+                                             </div>
+                                         </div>
+                                         <button
+                                             onClick={() => {
+                                                 onAddOffer(task.id, Number(offerPrice), `${durationValue} ${durationUnit === 'hours' ? t('mo_unit_hours') : t('mo_unit_days')}`, offerDescription, offerDateTime, isCompanyOffer ? 'company' : 'individual');
+                                                 setIsOfferFormOpen(false);
+                                                 setOfferPrice('');
+                                                 setOfferDescription('');
+                                             }}
+                                             disabled={!offerPrice || !durationValue || !offerDateTime || offerDescription.length < 20 || (isCompanyOffer ? !me?.stripeOnboardingComplete_company : (!me?.stripeOnboardingComplete_individual && !me?.stripeOnboardingComplete))}
+                                             className="
+                                                 w-full py-4 mt-6
+                                                 bg-slate-950 text-white 
+                                                 rounded-[22px] font-black text-lg 
+                                                 shadow-[0_10px_30px_-5px_rgba(0,0,0,0.5)] 
+                                                 hover:scale-[1.02] active:scale-[0.98] 
+                                                 disabled:opacity-40 disabled:scale-100
+                                                 transition-all flex items-center justify-center gap-3 
+                                                 group border border-emerald-500/30
+                                             "
+                                         >
+                                             <span className="uppercase tracking-widest">{t('btn_make_offer')}</span>
+                                             <div className="bg-emerald-500/20 p-1.5 rounded-full group-hover:bg-emerald-500/40 transition-colors">
+                                                 <ArrowRight size={18} className="group-hover:translate-x-1 transition-transform text-emerald-400" />
+                                             </div>
+                                         </button>
                                     </div>
                                 </div>
                             )}

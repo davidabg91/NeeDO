@@ -92,9 +92,10 @@ export interface PaymentModalProps {
   clientSecret: string | null;
   amountEuro: number;
   onSuccess: () => void;
+  subtitle?: string;
 }
 
-export const PaymentModal: React.FC<PaymentModalProps> = ({ isOpen, onClose, clientSecret, amountEuro, onSuccess }) => {
+export const PaymentModal: React.FC<PaymentModalProps> = ({ isOpen, onClose, clientSecret, amountEuro, onSuccess, subtitle }) => {
   if (!isOpen) return null;
 
   return (
@@ -108,7 +109,7 @@ export const PaymentModal: React.FC<PaymentModalProps> = ({ isOpen, onClose, cli
               <ShieldCheck size={20} className="text-emerald-500" />
               Сигурно Плащане
             </h2>
-            <p className="text-[11px] text-slate-500 font-medium">Парите се задържат в Escrow до приключване</p>
+            <p className="text-[11px] text-slate-500 font-medium">{subtitle || 'Парите се задържат в Escrow до приключване'}</p>
           </div>
           <button onClick={onClose} className="w-8 h-8 flex items-center justify-center bg-slate-200 hover:bg-slate-300 rounded-full text-slate-600 transition-colors">
             <X size={16} />

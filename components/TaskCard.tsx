@@ -11,12 +11,14 @@ interface TaskCardProps {
     distanceKm: number | null;
     onClick: () => void;
     onOfferClick: (e: React.MouseEvent) => void;
+    isViewed?: boolean;
+    getUserRating?: (userId: string) => { average: number, count: number };
 }
 
 // Needo Logo Placeholder
 const DEFAULT_AVATAR = "/logo.jpg";
 
-export const TaskCard: React.FC<TaskCardProps> = ({ task, distanceKm, onClick, onOfferClick }) => {
+export const TaskCard: React.FC<TaskCardProps> = ({ task, distanceKm, onClick, onOfferClick, isViewed, getUserRating }) => {
     const { t } = useLanguage();
 
     // NOTE: For scalability, we don't fetch all offers in the list view.
@@ -60,12 +62,23 @@ export const TaskCard: React.FC<TaskCardProps> = ({ task, distanceKm, onClick, o
 
                     {/* Image with Zoom Effect */}
                     <img
+                        key={task.imageUrl || 'fallback'}
                         src={task.imageUrl || fallbackImage}
                         alt={task.title}
                         className="w-full h-full object-cover transition-transform duration-700 ease-out group-hover:scale-105"
                         onError={(e) => {
                             const target = e.target as HTMLImageElement;
-                            if (target.src !== fallbackImage) target.src = fallbackImage;
+                            const retryCount = (target as any)._retryCount || 0;
+                            if (retryCount < 3) {
+                                (target as any)._retryCount = retryCount + 1;
+                                setTimeout(() => {
+                                    const currentSrc = target.src;
+                                    target.src = '';
+                                    target.src = currentSrc;
+                                }, 1000);
+                            } else if (target.src !== fallbackImage) {
+                                target.src = fallbackImage;
+                            }
                         }}
                     />
 
@@ -75,6 +88,13 @@ export const TaskCard: React.FC<TaskCardProps> = ({ task, distanceKm, onClick, o
                     {/* Top Badges */}
                     <div className="absolute top-3 left-3 right-3 flex justify-between items-start z-10">
                         <div className="flex gap-2">
+                            {!isViewed && task.status === TaskStatus.OPEN && (task.offersCount || 0) === 0 && (
+                                <div className="px-2.5 py-1.5 rounded-xl bg-blue-600 text-white shadow-lg border border-white/20 animate-pulse flex items-center">
+                                    <span className="text-[10px] font-black uppercase tracking-wider">
+                                        {t('badge_new')}
+                                    </span>
+                                </div>
+                            )}
                             {/* Status Pill */}
                             <div className={`px-2.5 py-1.5 rounded-xl backdrop-blur-md border border-white/20 shadow-sm flex items-center gap-1.5 
                         ${task.status === TaskStatus.OPEN ? 'bg-blue-500/80 text-white' : ''}
@@ -189,20 +209,31 @@ export const TaskCard: React.FC<TaskCardProps> = ({ task, distanceKm, onClick, o
                     <div className="pt-3 border-t border-slate-100 flex items-center justify-between">
                         <div className="flex items-center gap-2">
                             <img
+                                key={getAvatar(task.requesterAvatar)}
                                 src={getAvatar(task.requesterAvatar)}
                                 className="w-7 h-7 rounded-full object-cover ring-2 ring-slate-50"
                                 alt=""
+                                onError={(e) => {
+                                    const target = e.target as HTMLImageElement;
+                                    if (target.src !== DEFAULT_AVATAR) target.src = DEFAULT_AVATAR;
+                                }}
                             />
                             <div className="flex flex-col">
                                 <span className="text-[10px] font-bold text-slate-900 leading-none">{task.requesterName}</span>
-                                {!isNewUser ? (
-                                    <div className="flex items-center gap-1 mt-0.5">
-                                        <Star size={8} className="fill-amber-400 text-amber-400" />
-                                        <span className="text-[9px] font-bold text-slate-500">{task.requesterRating?.toFixed(1)}</span>
-                                    </div>
-                                ) : (
-                                    <span className="text-[8px] font-bold text-blue-500 bg-blue-50 px-1 rounded mt-0.5 w-fit">НОВ</span>
-                                )}
+                                {(() => {
+                                    const liveRating = getUserRating ? getUserRating(task.requesterId).average : task.requesterRating;
+                                    const hasRating = liveRating && liveRating > 0;
+                                    
+                                    if (hasRating) {
+                                        return (
+                                            <div className="flex items-center gap-1 mt-0.5">
+                                                <Star size={8} className="fill-amber-400 text-amber-400" />
+                                                <span className="text-[9px] font-bold text-slate-500">{liveRating.toFixed(1)}</span>
+                                            </div>
+                                        );
+                                    }
+                                    return <span className="text-[8px] font-bold text-blue-500 bg-blue-50 px-1 rounded mt-0.5 w-fit">НОВ</span>;
+                                })()}
                             </div>
                         </div>
 
